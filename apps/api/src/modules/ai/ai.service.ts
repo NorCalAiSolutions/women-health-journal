@@ -101,11 +101,12 @@ export class AiService {
 
   private detectLocalRedFlags(text: string) {
     const flags = [
-      ["self_harm", ["kill myself", "self harm", "hurt myself", "suicide"]],
+      ["self_harm", ["kill myself", "self harm", "hurt myself", "suicide", "end my life", "want to die", "can't go on", "cannot go on"]],
+      ["panic", ["panic attack", "can't breathe", "cannot breathe", "hyperventilating", "overwhelming panic"]],
       ["chest_pain", ["chest pain", "tight chest"]],
       ["fainting", ["fainted", "passed out"]],
-      ["unexplained_bleeding", ["unexplained bleeding", "heavy bleeding"]],
-      ["abuse_or_coercion", ["forced me", "afraid of him", "afraid of her", "coerced"]]
+      ["urgent_physical", ["unexplained bleeding", "heavy bleeding", "severe bleeding", "shortness of breath", "trouble breathing", "sudden weakness", "worst headache"]],
+      ["abuse_or_coercion", ["forced me", "afraid of him", "afraid of her", "coerced", "hit me", "threatened me", "unsafe at home", "controlling"]]
     ] as const;
     return flags.filter(([, terms]) => terms.some((term) => text.includes(term))).map(([name]) => name);
   }

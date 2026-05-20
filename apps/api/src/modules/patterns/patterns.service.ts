@@ -7,6 +7,16 @@ type HistoricalEntry = {
   extraction?: { extractedJson: ExtractedObservation };
 };
 
+type CorrelationResult = {
+  label: string;
+  statement: string;
+  confidence: number;
+  evidenceCount: number;
+  sampleSize: number;
+  evidence: string[];
+  limitation: string;
+};
+
 @Injectable()
 export class PatternService {
   detect(entries: HistoricalEntry[], windowDays: number): PatternResult[] {
@@ -25,20 +35,83 @@ export class PatternService {
     ];
   }
 
-  discoverCorrelations(entries: HistoricalEntry[]) {
-    const usable = entries.filter((entry) => entry.extraction?.extractedJson);
-    const poorSleepFatigue = usable.filter((entry) => {
-      const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
-      return sleep > 0 && sleep < 6 && entry.extraction?.extractedJson.fatigue;
-    }).length;
-
+  discoverCorrelations(entries: HistoricalEntry[]): CorrelationResult[] {
     return [
-      {
-        statement: "Fatigue appears more frequently after shorter sleep entries.",
-        confidence: usable.length ? Math.min(0.85, poorSleepFatigue / Math.max(usable.length, 1) + 0.25) : 0.1,
-        limitation: "This is an association only and does not imply causation."
-      }
-    ];
+      this.association(
+        "Sleep and fatigue",
+        "Fatigue appears more often in entries with shorter sleep.",
+        entries,
+        (entry) => {
+          const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
+          return Number.isFinite(sleep) && sleep > 0;
+        },
+        (entry) => {
+          const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
+          return sleep < 6 && Boolean(entry.extraction?.extractedJson.fatigue);
+        },
+        (entry) => {
+          const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
+          return `${formatDate(entry.occurredAt)}: ${sleep.toFixed(1)}h sleep with fatigue noted`;
+        }
+      ),
+      this.association(
+        "Stress and mood",
+        "Low or mixed mood appears more often near higher stress entries.",
+        entries,
+        (entry) => Number.isFinite(Number(entry.structuredJson?.stress)) && typeof entry.structuredJson?.mood === "string",
+        (entry) => Number(entry.structuredJson?.stress) >= 7 && ["very_low", "low", "mixed"].includes(String(entry.structuredJson?.mood)),
+        (entry) => `${formatDate(entry.occurredAt)}: stress ${entry.structuredJson?.stress}/10 with mood ${entry.structuredJson?.mood}`
+      ),
+      this.association(
+        "Cycle and skin changes",
+        "Cycle irregularity and acne are appearing together in some entries.",
+        entries,
+        (entry) => Boolean(entry.extraction?.extractedJson),
+        (entry) => Boolean(entry.extraction?.extractedJson.cycleIrregularity && entry.extraction?.extractedJson.acne),
+        (entry) => `${formatDate(entry.occurredAt)}: cycle irregularity and acne both noted`
+      ),
+      this.association(
+        "Stress and sleep",
+        "Higher stress appears near shorter sleep in some entries.",
+        entries,
+        (entry) => {
+          const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
+          return Number.isFinite(sleep) && Number.isFinite(Number(entry.structuredJson?.stress));
+        },
+        (entry) => {
+          const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
+          return Number(entry.structuredJson?.stress) >= 7 && sleep > 0 && sleep < 7;
+        },
+        (entry) => {
+          const sleep = Number(entry.extraction?.extractedJson.sleepHours ?? entry.structuredJson?.sleepHours);
+          return `${formatDate(entry.occurredAt)}: stress ${entry.structuredJson?.stress}/10 with ${sleep.toFixed(1)}h sleep`;
+        }
+      )
+    ]
+      .filter((correlation) => correlation.sampleSize > 0)
+      .sort((a, b) => b.confidence - a.confidence);
+  }
+
+  private association(
+    label: string,
+    statement: string,
+    entries: HistoricalEntry[],
+    isEligible: (entry: HistoricalEntry) => boolean,
+    isMatch: (entry: HistoricalEntry) => boolean,
+    evidenceLine: (entry: HistoricalEntry) => string
+  ): CorrelationResult {
+    const eligible = entries.filter(isEligible);
+    const matches = eligible.filter(isMatch);
+    const ratio = eligible.length ? matches.length / eligible.length : 0;
+    return {
+      label,
+      statement,
+      confidence: Number(Math.min(0.86, ratio * 0.65 + Math.min(eligible.length, 12) / 100).toFixed(2)),
+      evidenceCount: matches.length,
+      sampleSize: eligible.length,
+      evidence: matches.slice(-3).map(evidenceLine),
+      limitation: "This is an association from journal entries only. It may reflect coincidence, missing context, or logging patterns and does not imply causation."
+    };
   }
 
   private booleanTrend(name: string, key: keyof ExtractedObservation, entries: HistoricalEntry[], windowDays: number): PatternResult {
@@ -97,4 +170,8 @@ export class PatternService {
 
 function average(values: number[]) {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function formatDate(value: string) {
+  return new Date(value).toISOString().slice(0, 10);
 }

@@ -42,6 +42,42 @@ type JournalDetail = {
   redFlags?: unknown[];
 };
 
+type CorrelationResult = {
+  label: string;
+  statement: string;
+  confidence: number;
+  evidenceCount: number;
+  sampleSize: number;
+  evidence?: string[];
+  limitation: string;
+};
+
+type SafetyResource = {
+  label: string;
+  detail: string;
+};
+
+type RedFlag = {
+  category: string;
+  severity: "LOW" | "MODERATE" | "HIGH" | "URGENT";
+  title?: string;
+  guidance: string;
+  resources?: SafetyResource[];
+  matchedText?: string;
+};
+
+type JournalSubmitResult = {
+  extraction?: Record<string, unknown>;
+  redFlags?: RedFlag[];
+  disclaimer?: string;
+};
+
+type AuthUser = {
+  id?: string;
+  userId?: string;
+  displayName?: string;
+};
+
 const starterTimeline = [
   { day: "Mon", mood: 6, sleep: 7.5, stress: 4 },
   { day: "Tue", mood: 5, sleep: 6, stress: 6 },
@@ -74,6 +110,15 @@ type ChartPoint = {
   mood: number;
 };
 
+type InsightSummary = {
+  entryCount: number;
+  averageSleep: number | null;
+  averageStress: number | null;
+  averageMood: number | null;
+  commonSignals: string[];
+  notes: string[];
+};
+
 export default function Home() {
   const [authMode, setAuthMode] = useState<"login" | "register" | "verify" | "forgot" | "reset">("login");
   const [authUserId, setAuthUserId] = useState("");
@@ -83,6 +128,7 @@ export default function Home() {
   const [displayName, setDisplayName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [token, setToken] = useState<string | null>(null);
+  const [signedInUser, setSignedInUser] = useState<AuthUser | null>(null);
   const [authMessage, setAuthMessage] = useState("");
   const [rawText, setRawText] = useState("");
   const [sleepHours, setSleepHours] = useState("");
@@ -90,8 +136,9 @@ export default function Home() {
   const [energy, setEnergy] = useState(4);
   const [stress, setStress] = useState(6);
   const [consent, setConsent] = useState(true);
-  const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [result, setResult] = useState<JournalSubmitResult | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [correlations, setCorrelations] = useState<CorrelationResult[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<JournalDetail | null>(null);
   const [trendRange, setTrendRange] = useState(90);
   const [lastSubmittedText, setLastSubmittedText] = useState("");
@@ -99,7 +146,11 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    setToken(localStorage.getItem("whjc_access_token"));
+    const storedToken = localStorage.getItem("whjc_access_token");
+    setToken(storedToken);
+    if (storedToken) {
+      void loadCurrentUser(storedToken);
+    }
   }, []);
 
   useEffect(() => {
@@ -107,6 +158,7 @@ export default function Home() {
       void loadTimeline(token, trendRange);
     } else {
       setTimeline([]);
+      setCorrelations([]);
       setSelectedEntry(null);
     }
   }, [token, trendRange]);
@@ -115,6 +167,8 @@ export default function Home() {
     if (!timeline.length) return starterTimeline;
     return timeline.slice(-30).map((entry, index) => chartPointFromTimeline(entry, index));
   }, [timeline]);
+
+  const insightSummary = useMemo(() => buildInsightSummary(timeline), [timeline]);
 
   async function submitJournal() {
     if (!token) {
@@ -155,7 +209,7 @@ export default function Home() {
         setJournalMessage(formatApiError(data, "Could not save this journal entry."));
         return;
       }
-      setResult(data);
+      setResult(data as JournalSubmitResult);
       setLastSubmittedText(submittedText);
       await loadTimeline(token, trendRange);
       setRawText("");
@@ -177,6 +231,7 @@ export default function Home() {
     });
     const data = await timelineResponse.json();
     setTimeline(data.entries ?? []);
+    setCorrelations(data.correlations ?? []);
   }
 
   async function loadEntry(entryId: string) {
@@ -186,6 +241,15 @@ export default function Home() {
     });
     if (response.ok) {
       setSelectedEntry(await response.json());
+    }
+  }
+
+  async function loadCurrentUser(activeToken: string) {
+    const response = await fetch(`${API_URL}/auth/me`, {
+      headers: { Authorization: `Bearer ${activeToken}` }
+    });
+    if (response.ok) {
+      setSignedInUser(await response.json());
     }
   }
 
@@ -241,6 +305,7 @@ export default function Home() {
     const accessToken = String(data.accessToken ?? "");
     localStorage.setItem("whjc_access_token", accessToken);
     setToken(accessToken);
+    setSignedInUser((data.user as AuthUser | undefined) ?? null);
     setAuthMessage(
       authMode === "reset"
         ? "Password reset. You are signed in."
@@ -308,6 +373,7 @@ export default function Home() {
   function logout() {
     localStorage.removeItem("whjc_access_token");
     setToken(null);
+    setSignedInUser(null);
     setAuthUserId("");
     setAuthEmail("");
     setAuthCode("");
@@ -440,6 +506,9 @@ export default function Home() {
             )}
             {token && (
               <>
+                <span className="signed-in-user">
+                  Signed in as <b>{signedInUser?.displayName ?? signedInUser?.userId ?? "user"}</b>
+                </span>
                 <button className="secondary" onClick={downloadAccountData}>
                   <Download aria-hidden />
                   Export Account Data
@@ -523,6 +592,82 @@ export default function Home() {
           </div>
         </section>
 
+        {result?.redFlags?.length ? (
+          <section className={`panel safety-resources severity-${highestSeverity(result.redFlags).toLowerCase()}`}>
+            <div className="panel-title">
+              <AlertTriangle aria-hidden />
+              <h2>Safety Resources</h2>
+            </div>
+            <p>
+              These resources are shown because your entry contained wording that may suggest urgent support or professional care could be important.
+              This app cannot diagnose conditions or monitor emergencies.
+            </p>
+            <div className="resource-list">
+              {result.redFlags.map((flag) => (
+                <article className="resource-card" key={`${flag.category}-${flag.severity}`}>
+                  <div>
+                    <strong>{flag.title ?? safetyTitle(flag.category)}</strong>
+                    <span>{flag.severity}</span>
+                  </div>
+                  <p>{flag.guidance}</p>
+                  {flag.matchedText && <small>Signal: {flag.matchedText}</small>}
+                  {flag.resources?.length ? (
+                    <ul>
+                      {flag.resources.map((resource) => (
+                        <li key={resource.label}>
+                          <b>{resource.label}:</b> {resource.detail}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="panel insights-panel">
+          <div className="chart-heading">
+            <h2>Insights Summary</h2>
+            <span>{trendRange}-day range</span>
+          </div>
+          {!token && <p className="empty-state">Log in to view your trend summary.</p>}
+          {token && !timeline.length && <p className="empty-state">Save a few journal entries to see a range summary here.</p>}
+          {token && timeline.length ? (
+            <>
+              <div className="summary-metrics">
+                <article>
+                  <span>Entries</span>
+                  <strong>{insightSummary.entryCount}</strong>
+                </article>
+                <article>
+                  <span>Avg sleep</span>
+                  <strong>{formatNullableNumber(insightSummary.averageSleep, "h")}</strong>
+                </article>
+                <article>
+                  <span>Avg stress</span>
+                  <strong>{formatNullableNumber(insightSummary.averageStress, "/10")}</strong>
+                </article>
+                <article>
+                  <span>Avg mood</span>
+                  <strong>{formatNullableNumber(insightSummary.averageMood, "/10")}</strong>
+                </article>
+              </div>
+              <div className="insight-copy">
+                <p>
+                  Common signals: {insightSummary.commonSignals.length ? insightSummary.commonSignals.join(", ") : "not enough repeated signals yet"}.
+                </p>
+                <ul>
+                  {insightSummary.notes.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
+                <em>Informational trend summary only. It cannot diagnose conditions or establish medical cause.</em>
+              </div>
+            </>
+          ) : null}
+        </section>
+
         <section className="grid history-grid">
           <div className="panel">
             <div className="panel-title">
@@ -553,8 +698,23 @@ export default function Home() {
             {selectedEntry ? (
               <article className="read-only-entry">
                 <time>{new Date(selectedEntry.occurredAt).toLocaleString()}</time>
+                <div className="entry-summary">
+                  {entrySummaryItems(selectedEntry).map((item) => (
+                    <span key={item.label}>
+                      <b>{item.label}</b>
+                      {item.value}
+                    </span>
+                  ))}
+                </div>
+                <div className="signal-list">
+                  <strong>AI signals</strong>
+                  <span>{extractSignalNames(selectedEntry.extraction).join(", ") || "No AI signals available"}</span>
+                </div>
                 <p>{selectedEntry.rawText}</p>
-                <pre>{JSON.stringify(selectedEntry.extraction ?? {}, null, 2)}</pre>
+                <details>
+                  <summary>View extraction details</summary>
+                  <pre>{JSON.stringify(selectedEntry.extraction ?? {}, null, 2)}</pre>
+                </details>
               </article>
             ) : (
               <p className="empty-state">Select an entry from history to review it here. Old entries are view-only.</p>
@@ -601,6 +761,41 @@ export default function Home() {
                 <Area type="monotone" dataKey="sleep" stroke="#3d405b" fill="#81b29a" fillOpacity={0.35} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </AreaChart>
             </ResponsiveContainer>
+          </div>
+        </section>
+
+        <section className="panel correlations-panel">
+          <div className="chart-heading">
+            <h2>Possible Associations</h2>
+            <span>{trendRange}-day range</span>
+          </div>
+          {!token && <p className="empty-state">Log in to view possible associations.</p>}
+          {token && !correlations.length && (
+            <p className="empty-state">Possible associations will appear after you have saved journal entries with enough relevant mood, sleep, stress, cycle, or symptom data.</p>
+          )}
+          <div className="correlation-grid">
+            {correlations.map((correlation) => (
+              <article className="correlation-card" key={correlation.label}>
+                <div>
+                  <h3>{correlation.label}</h3>
+                  <strong>{Math.round(correlation.confidence * 100)}% confidence</strong>
+                </div>
+                <p>{correlation.statement}</p>
+                <small>
+                  Evidence: {correlation.evidenceCount} of {correlation.sampleSize} relevant entries.
+                </small>
+                {correlation.evidence?.length ? (
+                  <ul>
+                    {correlation.evidence.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="empty-state">Not enough matching entries yet.</p>
+                )}
+                <em>{correlation.limitation}</em>
+              </article>
+            ))}
           </div>
         </section>
 
@@ -681,4 +876,129 @@ function toChartNumber(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function highestSeverity(flags: RedFlag[]) {
+  const rank: Record<RedFlag["severity"], number> = {
+    LOW: 1,
+    MODERATE: 2,
+    HIGH: 3,
+    URGENT: 4
+  };
+  return flags.reduce<RedFlag["severity"]>((highest, flag) => (rank[flag.severity] > rank[highest] ? flag.severity : highest), "LOW");
+}
+
+function safetyTitle(category: string) {
+  const titles: Record<string, string> = {
+    mental_health_crisis: "Immediate emotional safety support",
+    acute_anxiety_or_panic: "High distress or panic symptoms",
+    urgent_physical_symptom: "Potential urgent physical symptom",
+    relationship_safety: "Relationship or personal safety concern"
+  };
+  return titles[category] ?? "Safety resource";
+}
+
+function buildInsightSummary(entries: TimelineEntry[]): InsightSummary {
+  const points = entries.map((entry, index) => chartPointFromTimeline(entry, index));
+  const averageSleep = averageNullable(points.map((point) => point.sleep));
+  const averageStress = averageNullable(points.map((point) => point.stress));
+  const averageMood = averageNullable(points.map((point) => point.mood));
+  const signalCounts = countTimelineSignals(entries);
+  const commonSignals = Object.entries(signalCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([signal, count]) => `${humanize(signal)} (${count})`);
+
+  return {
+    entryCount: entries.length,
+    averageSleep,
+    averageStress,
+    averageMood,
+    commonSignals,
+    notes: buildInsightNotes(entries, { averageSleep, averageStress, averageMood }, signalCounts)
+  };
+}
+
+function buildInsightNotes(
+  entries: TimelineEntry[],
+  averages: Pick<InsightSummary, "averageSleep" | "averageStress" | "averageMood">,
+  signalCounts: Record<string, number>
+) {
+  const notes: string[] = [];
+  if (entries.length < 3) {
+    notes.push("A few more entries will make patterns more reliable.");
+  }
+  if (averages.averageSleep !== null && averages.averageSleep < 6.5) {
+    notes.push("Sleep is averaging below 6.5 hours in this range.");
+  }
+  if (averages.averageStress !== null && averages.averageStress >= 7) {
+    notes.push("Stress is averaging high in this range.");
+  }
+  if (averages.averageMood !== null && averages.averageMood <= 4.5) {
+    notes.push("Mood entries are trending on the lower side in this range.");
+  }
+  const topSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0];
+  if (topSignal) {
+    notes.push(`${humanize(topSignal[0])} is the most repeated AI-observed signal.`);
+  }
+  return notes.length ? notes : ["No strong repeated pattern is visible yet in this range."];
+}
+
+function countTimelineSignals(entries: TimelineEntry[]) {
+  const counts: Record<string, number> = {};
+  for (const entry of entries) {
+    for (const signal of extractSignalNames(entry.extraction?.extractedJson)) {
+      counts[signal] = (counts[signal] ?? 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function entrySummaryItems(entry: JournalDetail) {
+  const structured = entry.structured ?? {};
+  const extraction = entry.extraction ?? {};
+  return [
+    { label: "Sleep", value: formatUnknown(structured.sleepHours ?? extraction.sleepHours, "h") },
+    { label: "Mood", value: humanize(String(structured.mood ?? extraction.mood ?? "not entered")) },
+    { label: "Energy", value: formatUnknown(structured.energy, "/10") },
+    { label: "Stress", value: formatUnknown(structured.stress, "/10") },
+    { label: "Confidence", value: formatConfidence(extraction.confidence) }
+  ];
+}
+
+function extractSignalNames(extraction: Record<string, unknown> | undefined) {
+  if (!extraction) return [];
+  const listed = Array.isArray(extraction.normalizedSymptoms) ? extraction.normalizedSymptoms.map(String) : [];
+  const flagged = ["fatigue", "acne", "pain", "headache", "digestiveIssues", "libidoChange", "cycleIrregularity"].filter(
+    (key) => extraction[key] === true
+  );
+  return Array.from(new Set([...listed, ...flagged])).map(humanize);
+}
+
+function averageNullable(values: Array<number | null>) {
+  const numbers = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  if (!numbers.length) return null;
+  return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+}
+
+function formatNullableNumber(value: number | null, suffix: string) {
+  return value === null ? "n/a" : `${value.toFixed(1)}${suffix}`;
+}
+
+function formatUnknown(value: unknown, suffix = "") {
+  if (value === null || value === undefined || value === "") return "Not entered";
+  return `${value}${suffix}`;
+}
+
+function formatConfidence(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? `${Math.round(numberValue * 100)}%` : "n/a";
+}
+
+function humanize(value: string) {
+  if (!value || value === "undefined" || value === "null") return "Not entered";
+  return value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
