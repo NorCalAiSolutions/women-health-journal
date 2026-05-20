@@ -1,0 +1,32 @@
+{
+  "name": "womens-health-journal-companion-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-powered journaling companion for supportive, non-diagnostic women's health trend awareness.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w @whjc/api\" \"npm run dev -w @whjc/web\"",
+    "build": "npm run build -w @whjc/shared && npm run build -w @whjc/api && npm run build -w @whjc/web",
+    "lint": "npm run lint -w @whjc/api && npm run lint -w @whjc/web",
+    "test": "npm run test -w @whjc/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "@nestjs/common": "^11.1.21",
+    "@nestjs/core": "^11.1.21",
+    "@nestjs/platform-express": "^11.1.21",
+    "postcss": "^8.5.10",
+    "next": {
+      "postcss": "^8.5.10"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,17 @@
+node_modules
+.next
+dist
+coverage
+.env
+.env.local
+.DS_Store
+*.log
+~$*.docx
+api-dev.log
+api-dev.err.log
+web-dev.log
+web-dev.err.log
+dev-server.log
+dev-server.err.log
+.prompt-docx
+.privacy-docx

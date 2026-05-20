@@ -1,0 +1,112 @@
+import { Injectable } from "@nestjs/common";
+import OpenAI from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
+import {
+  ExtractedObservation,
+  ExtractedObservationSchema,
+  Insight,
+  InsightSchema,
+  StructuredEntry
+} from "@whjc/shared";
+import { INSIGHT_SYSTEM_PROMPT, JOURNAL_EXTRACTION_SYSTEM_PROMPT } from "./prompts";
+
+@Injectable()
+export class AiService {
+  private readonly model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+  private client?: OpenAI;
+
+  async extractJournal(rawText: string, structured?: Partial<StructuredEntry>): Promise<ExtractedObservation> {
+    if (!process.env.OPENAI_API_KEY) {
+      return this.localFallbackExtraction(rawText, structured);
+    }
+
+    const response = await this.openai().responses.parse({
+      model: this.model,
+      input: [
+        { role: "system", content: JOURNAL_EXTRACTION_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: JSON.stringify({ rawText, structured: structured ?? {} })
+        }
+      ],
+      text: { format: zodTextFormat(ExtractedObservationSchema, "journal_extraction") }
+    });
+
+    return ExtractedObservationSchema.parse(response.output_parsed);
+  }
+
+  async generateInsight(history: unknown): Promise<Insight> {
+    if (!process.env.OPENAI_API_KEY) {
+      return {
+        summary: "Recent entries show wellness signals worth tracking over time.",
+        observedChanges: ["AI insight generation is using local fallback mode because no OpenAI API key is configured."],
+        possibleWellnessConsiderations: ["Review persistent or worsening patterns with a qualified healthcare professional."],
+        questionsToReflectOn: ["What changed on days when symptoms felt more noticeable?"],
+        suggestedProfessionalFollowUp: ["Bring this journal history to a clinician if concerns persist or intensify."],
+        confidence: 0.35,
+        evidence: [{ source: "history", field: "fallback", value: "no_openai_api_key" }],
+        limitations: ["Fallback mode does not perform semantic analysis."]
+      };
+    }
+
+    const response = await this.openai().responses.parse({
+      model: this.model,
+      input: [
+        { role: "system", content: INSIGHT_SYSTEM_PROMPT },
+        { role: "user", content: JSON.stringify(history) }
+      ],
+      text: { format: zodTextFormat(InsightSchema, "wellness_insight") }
+    });
+
+    return InsightSchema.parse(response.output_parsed);
+  }
+
+  private openai() {
+    if (!this.client) {
+      this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    }
+    return this.client;
+  }
+
+  private localFallbackExtraction(rawText: string, structured?: Partial<StructuredEntry>): ExtractedObservation {
+    const text = rawText.toLowerCase();
+    const has = (terms: string[]) => terms.some((term) => text.includes(term));
+    const sleep = structured?.sleepHours ?? Number(text.match(/(\d+(?:\.\d+)?)\s*(hours|hrs)/)?.[1] ?? NaN);
+    const evidence = [{ source: "journal_text" as const, quote: rawText.slice(0, 220) }];
+
+    const observationFlags = {
+      fatigue: has(["exhausted", "fatigue", "tired", "drained"]),
+      cycleIrregularity: has(["late on my period", "missed period", "irregular", "spotting"]),
+      acne: has(["acne", "breakout", "pimples"]),
+      pain: has(["pain", "ache", "cramp"]),
+      headache: has(["headache", "migraine"]),
+      digestiveIssues: has(["bloating", "nausea", "diarrhea", "constipation"]),
+      libidoChange: has(["libido", "sex drive"])
+    };
+
+    return {
+      ...observationFlags,
+      sleepHours: Number.isFinite(sleep) ? sleep : null,
+      stress: has(["panic", "overwhelmed", "stressed"]) ? "high" : has(["anxious", "stress"]) ? "moderate" : null,
+      mood: has(["sad", "hopeless"]) ? "low" : has(["anxious"]) ? "anxious" : null,
+      redFlagSignals: this.detectLocalRedFlags(text),
+      normalizedSymptoms: Object.entries(observationFlags)
+        .filter(([, active]) => active)
+        .map(([key]) => key),
+      confidence: 0.45,
+      evidence,
+      limitations: ["Fallback keyword extraction is less reliable than model-based structured extraction."]
+    };
+  }
+
+  private detectLocalRedFlags(text: string) {
+    const flags = [
+      ["self_harm", ["kill myself", "self harm", "hurt myself", "suicide"]],
+      ["chest_pain", ["chest pain", "tight chest"]],
+      ["fainting", ["fainted", "passed out"]],
+      ["unexplained_bleeding", ["unexplained bleeding", "heavy bleeding"]],
+      ["abuse_or_coercion", ["forced me", "afraid of him", "afraid of her", "coerced"]]
+    ] as const;
+    return flags.filter(([, terms]) => terms.some((term) => text.includes(term))).map(([name]) => name);
+  }
+}
