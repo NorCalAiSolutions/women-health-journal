@@ -2,6 +2,7 @@ import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/co
 import { JwtService } from "@nestjs/jwt";
 import * as argon2 from "argon2";
 import { randomInt } from "node:crypto";
+import { AuditContext, AuditService } from "../../common/audit.service";
 import { CryptoService } from "../../common/crypto.service";
 import { DatabaseService } from "../../common/database.service";
 import { EmailService } from "../../common/email.service";
@@ -33,10 +34,11 @@ export class AuthService {
     private readonly db: DatabaseService,
     private readonly jwt: JwtService,
     private readonly email: EmailService,
-    private readonly crypto: CryptoService
+    private readonly crypto: CryptoService,
+    private readonly audit: AuditService
   ) {}
 
-  async register(input: RegisterInput) {
+  async register(input: RegisterInput, context?: AuditContext) {
     const userId = input.userId.toLowerCase();
     const email = input.email.toLowerCase();
     if (await this.findByLoginId(userId)) {
@@ -53,9 +55,11 @@ export class AuthService {
        VALUES ($1, $2, $3, $4, $5)`,
       [id, userId, email, passwordHash, input.displayName ?? userId]
     );
+    await this.audit.log(id, "ACCOUNT_REGISTERED", { loginId: userId, emailDomain: emailDomain(email) }, context);
 
     const verificationCode = await this.createCode("email_verification_codes", id, 24 * 60);
     const emailSent = await this.email.sendVerificationCode(email, verificationCode);
+    await this.audit.log(id, "EMAIL_VERIFICATION_CODE_SENT", { emailSent }, context);
     return {
       requiresEmailVerification: true,
       emailSent,
@@ -64,19 +68,22 @@ export class AuthService {
     };
   }
 
-  async login(input: LoginInput) {
+  async login(input: LoginInput, context?: AuditContext) {
     const user = await this.findByLoginId(input.userId.toLowerCase());
     if (!user || !(await argon2.verify(user.password_hash, input.password))) {
+      await this.audit.log(user?.id ?? null, "LOGIN_FAILED", { attemptedLoginId: input.userId.toLowerCase(), reason: "invalid_credentials" }, context);
       throw new UnauthorizedException("Invalid user ID or password.");
     }
     if (!user.email_verified_at) {
+      await this.audit.log(user.id, "LOGIN_BLOCKED", { reason: "email_not_verified" }, context);
       throw new UnauthorizedException("Please verify your email before logging in.");
     }
 
+    await this.audit.log(user.id, "LOGIN_SUCCEEDED", { loginId: user.login_id }, context);
     return this.issueToken(user);
   }
 
-  async verifyEmail(input: VerifyEmailInput) {
+  async verifyEmail(input: VerifyEmailInput, context?: AuditContext) {
     const user = await this.findByLoginId(input.userId.toLowerCase());
     if (!user) {
       throw new UnauthorizedException("Invalid user ID or verification code.");
@@ -89,18 +96,21 @@ export class AuthService {
        WHERE id = $1`,
       [user.id]
     );
+    await this.audit.log(user.id, "EMAIL_VERIFIED", { loginId: user.login_id }, context);
 
     return this.issueToken({ id: user.id, login_id: user.login_id, display_name: user.display_name });
   }
 
-  async requestPasswordReset(input: RequestPasswordResetInput) {
+  async requestPasswordReset(input: RequestPasswordResetInput, context?: AuditContext) {
     const user = await this.findByEmail(input.email.toLowerCase());
     if (!user) {
+      await this.audit.log(null, "PASSWORD_RESET_REQUESTED", { matchedUser: false, emailDomain: emailDomain(input.email) }, context);
       return { message: "If that email is registered, a reset code has been sent." };
     }
 
     const resetCode = await this.createCode("password_reset_codes", user.id, 30);
     const emailSent = await this.email.sendPasswordResetCode(user.email, resetCode);
+    await this.audit.log(user.id, "PASSWORD_RESET_REQUESTED", { matchedUser: true, emailSent }, context);
     return {
       message: "If that email is registered, a reset code has been sent.",
       emailSent,
@@ -108,7 +118,7 @@ export class AuthService {
     };
   }
 
-  async resetPassword(input: ResetPasswordInput) {
+  async resetPassword(input: ResetPasswordInput, context?: AuditContext) {
     const user = await this.findByEmail(input.email.toLowerCase());
     if (!user) {
       throw new UnauthorizedException("Invalid email or reset code.");
@@ -122,6 +132,7 @@ export class AuthService {
        WHERE id = $2`,
       [passwordHash, user.id]
     );
+    await this.audit.log(user.id, "PASSWORD_RESET_COMPLETED", {}, context);
 
     return this.issueToken({ id: user.id, login_id: user.login_id, display_name: user.display_name });
   }
@@ -143,7 +154,7 @@ export class AuthService {
     };
   }
 
-  async exportAccount(userId: string) {
+  async exportAccount(userId: string, context?: AuditContext) {
     const userResult = await this.db.query<Pick<UserRow, "id" | "login_id" | "email" | "display_name" | "email_verified_at"> & { created_at: Date }>(
       `SELECT id, login_id, email, display_name, email_verified_at, created_at
        FROM ${this.db.table("users")}
@@ -194,6 +205,17 @@ export class AuthService {
       [userId]
     );
 
+    await this.audit.log(
+      userId,
+      "ACCOUNT_EXPORT_DOWNLOADED",
+      {
+        format: "json",
+        journalEntryCount: entries.rowCount ?? entries.rows.length,
+        consentRecordCount: consents.rowCount ?? consents.rows.length
+      },
+      context
+    );
+
     return {
       generatedAt: new Date().toISOString(),
       disclaimer: "User-controlled export. AI outputs are informational only and are not diagnoses.",
@@ -218,12 +240,9 @@ export class AuthService {
     };
   }
 
-  async deleteAccount(userId: string) {
-    await this.db.query(
-      `INSERT INTO ${this.db.table("audit_events")} (id, user_id, action, metadata)
-       VALUES ($1, $2, 'ACCOUNT_DELETE_REQUESTED', '{}'::jsonb)`,
-      [this.db.id(), userId]
-    );
+  async deleteAccount(userId: string, context?: AuditContext) {
+    const counts = await this.accountCounts(userId);
+    await this.audit.log(userId, "ACCOUNT_DELETE_REQUESTED", counts, context);
     const result = await this.db.query(`DELETE FROM ${this.db.table("users")} WHERE id = $1`, [userId]);
     return {
       deleted: (result.rowCount ?? 0) > 0,
@@ -303,4 +322,33 @@ export class AuthService {
       }
     };
   }
+
+  private async accountCounts(userId: string) {
+    const result = await this.db.query<{
+      journal_entries: string;
+      ai_extractions: string;
+      red_flag_events: string;
+      consents: string;
+    }>(
+      `SELECT
+         (SELECT count(*) FROM ${this.db.table("journal_entries")} WHERE user_id = $1)::text AS journal_entries,
+         (SELECT count(*) FROM ${this.db.table("ai_extractions")} ae
+            JOIN ${this.db.table("journal_entries")} je ON je.id = ae.journal_entry_id
+            WHERE je.user_id = $1)::text AS ai_extractions,
+         (SELECT count(*) FROM ${this.db.table("red_flag_events")} WHERE user_id = $1)::text AS red_flag_events,
+         (SELECT count(*) FROM ${this.db.table("consents")} WHERE user_id = $1)::text AS consents`,
+      [userId]
+    );
+    const row = result.rows[0];
+    return {
+      journalEntryCount: Number(row?.journal_entries ?? 0),
+      aiExtractionCount: Number(row?.ai_extractions ?? 0),
+      redFlagEventCount: Number(row?.red_flag_events ?? 0),
+      consentRecordCount: Number(row?.consents ?? 0)
+    };
+  }
+}
+
+function emailDomain(email: string) {
+  return email.split("@")[1]?.toLowerCase() ?? "unknown";
 }

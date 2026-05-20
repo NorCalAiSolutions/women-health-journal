@@ -641,6 +641,19 @@ pre {
   font-size: 0.84rem;
 }
 
+.chart-empty {
+  min-height: 260px;
+  border: 1px dashed var(--line);
+  background: #fffaf4;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  text-align: center;
+  line-height: 1.5;
+}
+
 .correlations-panel {
   display: grid;
   gap: 14px;

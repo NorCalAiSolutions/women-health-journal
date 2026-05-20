@@ -164,9 +164,9 @@ export default function Home() {
   }, [token, trendRange]);
 
   const chartData = useMemo(() => {
-    if (!timeline.length) return starterTimeline;
+    if (!timeline.length) return token ? [] : starterTimeline;
     return timeline.slice(-30).map((entry, index) => chartPointFromTimeline(entry, index));
-  }, [timeline]);
+  }, [timeline, token]);
 
   const insightSummary = useMemo(() => buildInsightSummary(timeline), [timeline]);
 
@@ -736,31 +736,39 @@ export default function Home() {
                 </select>
               </label>
             </div>
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="day" />
-                <YAxis />
-                <Tooltip />
-                <Line type="monotone" dataKey="mood" stroke="#1f7a8c" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-                <Line type="monotone" dataKey="stress" stroke="#b23a48" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-              </LineChart>
-            </ResponsiveContainer>
+            {chartData.length ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="day" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="mood" stroke="#1f7a8c" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                  <Line type="monotone" dataKey="stress" stroke="#b23a48" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="chart-empty">Mood and stress trends will appear after you save journal entries.</div>
+            )}
           </div>
           <div className="panel">
             <div className="chart-heading">
               <h2>Sleep Trend</h2>
               <span>{timeline.length} entries</span>
             </div>
-            <ResponsiveContainer width="100%" height={260}>
-              <AreaChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="day" />
-                <YAxis />
-                <Tooltip />
-                <Area type="monotone" dataKey="sleep" stroke="#3d405b" fill="#81b29a" fillOpacity={0.35} dot={{ r: 4 }} activeDot={{ r: 6 }} />
-              </AreaChart>
-            </ResponsiveContainer>
+            {chartData.length ? (
+              <ResponsiveContainer width="100%" height={260}>
+                <AreaChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="day" />
+                  <YAxis />
+                  <Tooltip />
+                  <Area type="monotone" dataKey="sleep" stroke="#3d405b" fill="#81b29a" fillOpacity={0.35} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="chart-empty">Sleep trends will appear after you save journal entries with sleep hours.</div>
+            )}
           </div>
         </section>
 

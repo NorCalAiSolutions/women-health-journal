@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { Request } from "express";
+import { AuditService } from "../../common/audit.service";
 import { parseZod } from "../../common/parse-zod";
 import { CurrentUser } from "./current-user.decorator";
 import { JwtAuthGuard } from "./jwt-auth.guard";
@@ -13,31 +15,34 @@ import {
 
 @Controller("auth")
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly audit: AuditService
+  ) {}
 
   @Post("register")
-  register(@Body() body: unknown) {
-    return this.auth.register(parseZod(RegisterSchema, body));
+  register(@Body() body: unknown, @Req() req: Request) {
+    return this.auth.register(parseZod(RegisterSchema, body), this.audit.contextFromRequest(req));
   }
 
   @Post("login")
-  login(@Body() body: unknown) {
-    return this.auth.login(parseZod(LoginSchema, body));
+  login(@Body() body: unknown, @Req() req: Request) {
+    return this.auth.login(parseZod(LoginSchema, body), this.audit.contextFromRequest(req));
   }
 
   @Post("verify-email")
-  verifyEmail(@Body() body: unknown) {
-    return this.auth.verifyEmail(parseZod(VerifyEmailSchema, body));
+  verifyEmail(@Body() body: unknown, @Req() req: Request) {
+    return this.auth.verifyEmail(parseZod(VerifyEmailSchema, body), this.audit.contextFromRequest(req));
   }
 
   @Post("request-password-reset")
-  requestPasswordReset(@Body() body: unknown) {
-    return this.auth.requestPasswordReset(parseZod(RequestPasswordResetSchema, body));
+  requestPasswordReset(@Body() body: unknown, @Req() req: Request) {
+    return this.auth.requestPasswordReset(parseZod(RequestPasswordResetSchema, body), this.audit.contextFromRequest(req));
   }
 
   @Post("reset-password")
-  resetPassword(@Body() body: unknown) {
-    return this.auth.resetPassword(parseZod(ResetPasswordSchema, body));
+  resetPassword(@Body() body: unknown, @Req() req: Request) {
+    return this.auth.resetPassword(parseZod(ResetPasswordSchema, body), this.audit.contextFromRequest(req));
   }
 
   @Get("me")
@@ -48,13 +53,13 @@ export class AuthController {
 
   @Get("account-export")
   @UseGuards(JwtAuthGuard)
-  accountExport(@CurrentUser("sub") userId: string) {
-    return this.auth.exportAccount(userId);
+  accountExport(@CurrentUser("sub") userId: string, @Req() req: Request) {
+    return this.auth.exportAccount(userId, this.audit.contextFromRequest(req));
   }
 
   @Delete("account")
   @UseGuards(JwtAuthGuard)
-  deleteAccount(@CurrentUser("sub") userId: string) {
-    return this.auth.deleteAccount(userId);
+  deleteAccount(@CurrentUser("sub") userId: string, @Req() req: Request) {
+    return this.auth.deleteAccount(userId, this.audit.contextFromRequest(req));
   }
 }

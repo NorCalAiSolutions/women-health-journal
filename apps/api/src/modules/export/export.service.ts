@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import PDFDocument from "pdfkit";
+import { AuditContext, AuditService } from "../../common/audit.service";
 import { CryptoService } from "../../common/crypto.service";
 import { DatabaseService } from "../../common/database.service";
 
@@ -17,10 +18,11 @@ type ExportEntryRow = {
 export class ExportService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly crypto: CryptoService
+    private readonly crypto: CryptoService,
+    private readonly audit: AuditService
   ) {}
 
-  async generateDoctorPdf(userId: string, days: number): Promise<Buffer> {
+  async generateDoctorPdf(userId: string, days: number, context?: AuditContext): Promise<Buffer> {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const entries = await this.db.query<ExportEntryRow>(
       `SELECT
@@ -56,6 +58,18 @@ export class ExportService {
         ...flag,
         occurredAt: entry.occurred_at
       }))
+    );
+
+    await this.audit.log(
+      userId,
+      "DOCTOR_PDF_DOWNLOADED",
+      {
+        rangeDays: days,
+        entryCount: reportEntries.length,
+        redFlagCount: redFlags.length,
+        format: "pdf"
+      },
+      context
     );
 
     return new Promise((resolve) => {
