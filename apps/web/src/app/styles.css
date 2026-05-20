@@ -381,6 +381,17 @@ button.secondary {
   border-color: var(--line);
 }
 
+button.danger {
+  background: transparent;
+  color: var(--rose);
+  border-color: var(--rose);
+}
+
+button.danger:hover {
+  background: var(--rose);
+  color: #fffaf2;
+}
+
 button.link-button {
   height: auto;
   padding: 0;
@@ -445,6 +456,23 @@ pre {
   font-family: "Courier New", Courier, monospace;
 }
 
+.chart-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.chart-heading label {
+  min-width: 150px;
+}
+
+.chart-heading span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 @media (max-width: 900px) {
   main {
     grid-template-columns: 1fr;
@@ -463,5 +491,10 @@ pre {
 
   .workspace {
     padding: 18px;
+  }
+
+  .chart-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

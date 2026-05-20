@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Post, UseGuards } from "@nestjs/common";
 import { parseZod } from "../../common/parse-zod";
 import { CurrentUser } from "./current-user.decorator";
 import { JwtAuthGuard } from "./jwt-auth.guard";
@@ -44,5 +44,17 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser("sub") userId: string) {
     return this.auth.me(userId);
+  }
+
+  @Get("account-export")
+  @UseGuards(JwtAuthGuard)
+  accountExport(@CurrentUser("sub") userId: string) {
+    return this.auth.exportAccount(userId);
+  }
+
+  @Delete("account")
+  @UseGuards(JwtAuthGuard)
+  deleteAccount(@CurrentUser("sub") userId: string) {
+    return this.auth.deleteAccount(userId);
   }
 }

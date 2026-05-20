@@ -2,7 +2,9 @@ import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/co
 import { JwtService } from "@nestjs/jwt";
 import * as argon2 from "argon2";
 import { randomInt } from "node:crypto";
+import { CryptoService } from "../../common/crypto.service";
 import { DatabaseService } from "../../common/database.service";
+import { EmailService } from "../../common/email.service";
 import {
   LoginInput,
   RegisterInput,
@@ -29,7 +31,9 @@ type CodeRow = {
 export class AuthService {
   constructor(
     private readonly db: DatabaseService,
-    private readonly jwt: JwtService
+    private readonly jwt: JwtService,
+    private readonly email: EmailService,
+    private readonly crypto: CryptoService
   ) {}
 
   async register(input: RegisterInput) {
@@ -51,10 +55,12 @@ export class AuthService {
     );
 
     const verificationCode = await this.createCode("email_verification_codes", id, 24 * 60);
+    const emailSent = await this.email.sendVerificationCode(email, verificationCode);
     return {
       requiresEmailVerification: true,
+      emailSent,
       user: { userId, email, displayName: input.displayName ?? userId },
-      devVerificationCode: this.includeDevCodes() ? verificationCode : undefined
+      devVerificationCode: !emailSent && this.includeDevCodes() ? verificationCode : undefined
     };
   }
 
@@ -94,9 +100,11 @@ export class AuthService {
     }
 
     const resetCode = await this.createCode("password_reset_codes", user.id, 30);
+    const emailSent = await this.email.sendPasswordResetCode(user.email, resetCode);
     return {
       message: "If that email is registered, a reset code has been sent.",
-      devResetCode: this.includeDevCodes() ? resetCode : undefined
+      emailSent,
+      devResetCode: !emailSent && this.includeDevCodes() ? resetCode : undefined
     };
   }
 
@@ -135,11 +143,99 @@ export class AuthService {
     };
   }
 
+  async exportAccount(userId: string) {
+    const userResult = await this.db.query<Pick<UserRow, "id" | "login_id" | "email" | "display_name" | "email_verified_at"> & { created_at: Date }>(
+      `SELECT id, login_id, email, display_name, email_verified_at, created_at
+       FROM ${this.db.table("users")}
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [userId]
+    );
+    const user = userResult.rows[0];
+    if (!user) {
+      throw new UnauthorizedException("User no longer exists.");
+    }
+
+    const entries = await this.db.query<{
+      id: string;
+      occurred_at: Date;
+      created_at: Date;
+      raw_text_ciphertext: string;
+      raw_text_nonce: string;
+      structured_json: Record<string, unknown>;
+      extracted_json: Record<string, unknown> | null;
+      red_flags: unknown[];
+    }>(
+      `SELECT
+         je.id,
+         je.occurred_at,
+         je.created_at,
+         je.raw_text_ciphertext,
+         je.raw_text_nonce,
+         je.structured_json,
+         ae.extracted_json,
+         COALESCE(jsonb_agg(jsonb_build_object(
+           'category', rfe.category,
+           'severity', rfe.severity,
+           'guidance', rfe.guidance,
+           'matchedText', rfe.matched_text,
+           'createdAt', rfe.created_at
+         )) FILTER (WHERE rfe.id IS NOT NULL), '[]'::jsonb) AS red_flags
+       FROM ${this.db.table("journal_entries")} je
+       LEFT JOIN ${this.db.table("ai_extractions")} ae ON ae.journal_entry_id = je.id
+       LEFT JOIN ${this.db.table("red_flag_events")} rfe ON rfe.journal_entry_id = je.id
+       WHERE je.user_id = $1
+       GROUP BY je.id, je.occurred_at, je.created_at, je.raw_text_ciphertext, je.raw_text_nonce, je.structured_json, ae.extracted_json
+       ORDER BY je.occurred_at ASC`,
+      [userId]
+    );
+
+    const consents = await this.db.query(
+      `SELECT scope, granted, version, created_at FROM ${this.db.table("consents")} WHERE user_id = $1 ORDER BY created_at ASC`,
+      [userId]
+    );
+
+    return {
+      generatedAt: new Date().toISOString(),
+      disclaimer: "User-controlled export. AI outputs are informational only and are not diagnoses.",
+      user: {
+        id: user.id,
+        userId: user.login_id,
+        email: user.email,
+        displayName: user.display_name,
+        emailVerifiedAt: user.email_verified_at,
+        createdAt: user.created_at
+      },
+      consents: consents.rows,
+      journalEntries: entries.rows.map((entry) => ({
+        id: entry.id,
+        occurredAt: entry.occurred_at,
+        createdAt: entry.created_at,
+        rawText: this.crypto.decrypt(entry.raw_text_ciphertext, entry.raw_text_nonce),
+        structured: entry.structured_json,
+        aiExtraction: entry.extracted_json,
+        redFlags: entry.red_flags
+      }))
+    };
+  }
+
+  async deleteAccount(userId: string) {
+    await this.db.query(
+      `INSERT INTO ${this.db.table("audit_events")} (id, user_id, action, metadata)
+       VALUES ($1, $2, 'ACCOUNT_DELETE_REQUESTED', '{}'::jsonb)`,
+      [this.db.id(), userId]
+    );
+    const result = await this.db.query(`DELETE FROM ${this.db.table("users")} WHERE id = $1`, [userId]);
+    return {
+      deleted: (result.rowCount ?? 0) > 0,
+      message: "Account and journal data deleted."
+    };
+  }
+
   private async findByLoginId(loginId: string) {
     const result = await this.db.query<UserRow>(
       `SELECT id, login_id, email, email_verified_at, password_hash, display_name
        FROM ${this.db.table("users")}
-       WHERE login_id = $1`,
+       WHERE login_id = $1 AND deleted_at IS NULL`,
       [loginId]
     );
     return result.rows[0];
@@ -149,7 +245,7 @@ export class AuthService {
     const result = await this.db.query<UserRow>(
       `SELECT id, login_id, email, email_verified_at, password_hash, display_name
        FROM ${this.db.table("users")}
-       WHERE lower(email) = lower($1)`,
+       WHERE lower(email) = lower($1) AND deleted_at IS NULL`,
       [email]
     );
     return result.rows[0];

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, BookOpen, Download, Eye, EyeOff, KeyRound, Lock, LogOut, Send, ShieldCheck, Sparkles, UserPlus } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, Download, Eye, EyeOff, KeyRound, Lock, LogOut, Send, ShieldCheck, Sparkles, Trash2, UserPlus } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -93,6 +93,7 @@ export default function Home() {
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<JournalDetail | null>(null);
+  const [trendRange, setTrendRange] = useState(90);
   const [lastSubmittedText, setLastSubmittedText] = useState("");
   const [journalMessage, setJournalMessage] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -103,12 +104,12 @@ export default function Home() {
 
   useEffect(() => {
     if (token) {
-      void loadTimeline(token);
+      void loadTimeline(token, trendRange);
     } else {
       setTimeline([]);
       setSelectedEntry(null);
     }
-  }, [token]);
+  }, [token, trendRange]);
 
   const chartData = useMemo(() => {
     if (!timeline.length) return starterTimeline;
@@ -156,7 +157,7 @@ export default function Home() {
       }
       setResult(data);
       setLastSubmittedText(submittedText);
-      await loadTimeline(token);
+      await loadTimeline(token, trendRange);
       setRawText("");
       setSleepHours("");
       setMood("");
@@ -170,8 +171,8 @@ export default function Home() {
     }
   }
 
-  async function loadTimeline(activeToken: string) {
-    const timelineResponse = await fetch(`${API_URL}/journal/timeline?range=90`, {
+  async function loadTimeline(activeToken: string, rangeDays: number) {
+    const timelineResponse = await fetch(`${API_URL}/journal/timeline?range=${rangeDays}`, {
       headers: { Authorization: `Bearer ${activeToken}` }
     });
     const data = await timelineResponse.json();
@@ -252,7 +253,7 @@ export default function Home() {
       setAuthMessage("Please log in before exporting.");
       return;
     }
-    const response = await fetch(`${API_URL}/exports/doctor.pdf?days=90`, {
+    const response = await fetch(`${API_URL}/exports/doctor.pdf?days=${trendRange}`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     const blob = await response.blob();
@@ -262,6 +263,46 @@ export default function Home() {
     link.download = "health-journal-summary.pdf";
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function downloadAccountData() {
+    if (!token) {
+      setAuthMessage("Please log in before exporting account data.");
+      return;
+    }
+    const response = await fetch(`${API_URL}/auth/account-export`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setAuthMessage(formatApiError(data, "Could not export account data."));
+      return;
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "whjc-account-export.json";
+    link.click();
+    URL.revokeObjectURL(url);
+    setAuthMessage("Account data export downloaded.");
+  }
+
+  async function deleteAccount() {
+    if (!token) return;
+    const confirmed = window.confirm("Delete this account and all saved journal data? This cannot be undone.");
+    if (!confirmed) return;
+    const response = await fetch(`${API_URL}/auth/account`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setAuthMessage(formatApiError(data, "Could not delete account."));
+      return;
+    }
+    logout();
+    setAuthMessage(String(data.message ?? "Account and journal data deleted."));
   }
 
   function logout() {
@@ -398,10 +439,20 @@ export default function Home() {
               </>
             )}
             {token && (
-              <button className="secondary" onClick={logout}>
-                <LogOut aria-hidden />
-                Log Out
-              </button>
+              <>
+                <button className="secondary" onClick={downloadAccountData}>
+                  <Download aria-hidden />
+                  Export Account Data
+                </button>
+                <button className="danger" onClick={deleteAccount}>
+                  <Trash2 aria-hidden />
+                  Delete Account
+                </button>
+                <button className="secondary" onClick={logout}>
+                  <LogOut aria-hidden />
+                  Log Out
+                </button>
+              </>
             )}
             <span>{authMessage}</span>
           </div>
@@ -513,7 +564,18 @@ export default function Home() {
 
         <section className="charts" id="trends">
           <div className="panel">
-            <h2>Mood and Stress Timeline</h2>
+            <div className="chart-heading">
+              <h2>Mood and Stress Timeline</h2>
+              <label>
+                Range
+                <select value={trendRange} onChange={(event) => setTrendRange(Number(event.target.value))}>
+                  <option value={7}>7 days</option>
+                  <option value={30}>30 days</option>
+                  <option value={90}>90 days</option>
+                  <option value={365}>1 year</option>
+                </select>
+              </label>
+            </div>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -526,7 +588,10 @@ export default function Home() {
             </ResponsiveContainer>
           </div>
           <div className="panel">
-            <h2>Sleep Trend</h2>
+            <div className="chart-heading">
+              <h2>Sleep Trend</h2>
+              <span>{timeline.length} entries</span>
+            </div>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" />

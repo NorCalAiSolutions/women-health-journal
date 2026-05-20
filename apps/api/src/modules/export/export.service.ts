@@ -50,6 +50,7 @@ export class ExportService {
     }));
     const symptomCounts = countSymptoms(reportEntries);
     const averages = averageMetrics(reportEntries);
+    const trendNotes = buildTrendNotes(reportEntries);
     const redFlags = reportEntries.flatMap((entry) =>
       (entry.red_flags ?? []).map((flag) => ({
         ...flag,
@@ -76,9 +77,14 @@ export class ExportService {
         `Average sleep: ${formatAverage(averages.sleepHours, "hours")}`,
         `Average stress: ${formatAverage(averages.stress, "/10")}`,
         `Average energy: ${formatAverage(averages.energy, "/10")}`,
+        `Average mood score: ${formatAverage(averages.mood, "/10")}`,
         `Most frequent logged signals: ${formatCounts(symptomCounts)}`,
         `Red flag events: ${redFlags.length || "none recorded"}`
       ]);
+      doc.moveDown();
+
+      doc.fontSize(14).text("Trend Notes");
+      doc.fontSize(10).list(trendNotes.length ? trendNotes : ["Not enough dated entries to compare early versus recent patterns."]);
       doc.moveDown();
 
       doc.fontSize(14).text("Observed Signals");
@@ -164,8 +170,31 @@ function averageMetrics(entries: ExportEntryRow[]) {
   return {
     sleepHours: average(entries.map((entry) => entry.structured_json?.sleepHours ?? entry.extracted_json?.sleepHours)),
     stress: average(entries.map((entry) => entry.structured_json?.stress)),
-    energy: average(entries.map((entry) => entry.structured_json?.energy))
+    energy: average(entries.map((entry) => entry.structured_json?.energy)),
+    mood: average(entries.map((entry) => moodToScore(entry.structured_json?.mood ?? entry.extracted_json?.mood)))
   };
+}
+
+function buildTrendNotes(entries: ExportEntryRow[]) {
+  if (entries.length < 2) return [];
+  const midpoint = Math.ceil(entries.length / 2);
+  const early = entries.slice(0, midpoint);
+  const recent = entries.slice(midpoint);
+  if (!recent.length) return [];
+
+  return [
+    compareMetric("Sleep", averageMetrics(early).sleepHours, averageMetrics(recent).sleepHours, "hours"),
+    compareMetric("Stress", averageMetrics(early).stress, averageMetrics(recent).stress, "/10"),
+    compareMetric("Energy", averageMetrics(early).energy, averageMetrics(recent).energy, "/10"),
+    compareMetric("Mood", averageMetrics(early).mood, averageMetrics(recent).mood, "/10")
+  ].filter(Boolean);
+}
+
+function compareMetric(label: string, early: number | null, recent: number | null, suffix: string) {
+  if (early === null || recent === null) return "";
+  const delta = recent - early;
+  const direction = Math.abs(delta) < 0.25 ? "stayed about the same" : delta > 0 ? "increased" : "decreased";
+  return `${label} ${direction}: early average ${early.toFixed(1)} ${suffix}, recent average ${recent.toFixed(1)} ${suffix}.`;
 }
 
 function normalizedSymptoms(extracted: Record<string, unknown>) {
@@ -189,9 +218,27 @@ function evidenceQuotes(extracted: Record<string, unknown>) {
 }
 
 function average(values: unknown[]) {
-  const numbers = values.map(Number).filter(Number.isFinite);
+  const numbers = values
+    .filter((value) => value !== null && value !== undefined && value !== "")
+    .map(Number)
+    .filter(Number.isFinite);
   if (!numbers.length) return null;
   return numbers.reduce((sum, value) => sum + value, 0) / numbers.length;
+}
+
+function moodToScore(value: unknown) {
+  const scores: Record<string, number> = {
+    very_low: 2,
+    low: 4,
+    anxious: 4,
+    sad: 3,
+    neutral: 6,
+    mixed: 6,
+    good: 8,
+    great: 10
+  };
+  if (typeof value !== "string") return null;
+  return scores[value] ?? null;
 }
 
 function formatAverage(value: number | null, suffix: string) {
