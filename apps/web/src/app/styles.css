@@ -201,7 +201,7 @@ textarea {
 
 .fields {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   margin: 14px 0;
 }
@@ -319,6 +319,18 @@ input:not([type="range"]):not([type="checkbox"]) {
   padding: 0 10px;
   font: inherit;
   font-size: 1rem;
+}
+
+select {
+  min-width: 0;
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: #fffaf4;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 1rem;
+  color: var(--ink);
 }
 
 input[type="range"] {

@@ -19,7 +19,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 type TimelineEntry = {
   id: string;
   occurredAt: string;
-  structuredJson?: Record<string, number | string>;
+  structuredJson?: Record<string, number | string | undefined>;
   extraction?: {
     extractedJson?: {
       fatigue?: boolean;
@@ -28,6 +28,7 @@ type TimelineEntry = {
       confidence?: number;
       stress?: string | null;
       sleepHours?: number | null;
+      mood?: string | null;
     };
   };
 };
@@ -54,6 +55,25 @@ const starterTimeline = [
 const sampleJournalText =
   "I slept 9 hours but still felt exhausted. Acne is getting worse. I am late on my period again and felt anxious after lunch.";
 
+const moodScores: Record<string, number> = {
+  very_low: 2,
+  low: 4,
+  neutral: 6,
+  mixed: 6,
+  good: 8,
+  great: 10,
+  anxious: 4,
+  sad: 3
+};
+
+type ChartPoint = {
+  day: string;
+  entry: number;
+  sleep: number | null;
+  stress: number | null;
+  mood: number;
+};
+
 export default function Home() {
   const [authMode, setAuthMode] = useState<"login" | "register" | "verify" | "forgot" | "reset">("login");
   const [authUserId, setAuthUserId] = useState("");
@@ -66,6 +86,7 @@ export default function Home() {
   const [authMessage, setAuthMessage] = useState("");
   const [rawText, setRawText] = useState("");
   const [sleepHours, setSleepHours] = useState("");
+  const [mood, setMood] = useState("");
   const [energy, setEnergy] = useState(4);
   const [stress, setStress] = useState(6);
   const [consent, setConsent] = useState(true);
@@ -91,12 +112,7 @@ export default function Home() {
 
   const chartData = useMemo(() => {
     if (!timeline.length) return starterTimeline;
-    return timeline.map((entry) => ({
-      day: new Date(entry.occurredAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-      sleep: Number(entry.extraction?.extractedJson?.sleepHours ?? entry.structuredJson?.sleepHours ?? 0),
-      stress: Number(entry.structuredJson?.stress ?? 0),
-      mood: entry.extraction?.extractedJson?.fatigue ? 4 : 7
-    }));
+    return timeline.slice(-30).map((entry, index) => chartPointFromTimeline(entry, index));
   }, [timeline]);
 
   async function submitJournal() {
@@ -109,6 +125,13 @@ export default function Home() {
       return;
     }
     const submittedText = rawText;
+    const structured: Record<string, number | string | string[]> = {
+      ...(sleepHours.trim() ? { sleepHours: Number(sleepHours) } : {}),
+      ...(mood ? { mood } : {}),
+      energy,
+      stress,
+      symptoms: []
+    };
     setJournalMessage("");
     setIsSubmitting(true);
     try {
@@ -118,12 +141,7 @@ export default function Home() {
         body: JSON.stringify({
           rawText,
           consentToAiAnalysis: consent,
-          structured: {
-            sleepHours: Number(sleepHours),
-            energy,
-            stress,
-            symptoms: []
-          }
+          structured
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -141,6 +159,7 @@ export default function Home() {
       await loadTimeline(token);
       setRawText("");
       setSleepHours("");
+      setMood("");
       setEnergy(4);
       setStress(6);
       setJournalMessage("Entry saved. AI extraction updated below.");
@@ -405,6 +424,18 @@ export default function Home() {
                 <input value={sleepHours} onChange={(event) => setSleepHours(event.target.value)} inputMode="decimal" />
               </label>
               <label>
+                Mood
+                <select value={mood} onChange={(event) => setMood(event.target.value)}>
+                  <option value="">Select mood</option>
+                  <option value="very_low">Very low</option>
+                  <option value="low">Low</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="mixed">Mixed</option>
+                  <option value="good">Good</option>
+                  <option value="great">Great</option>
+                </select>
+              </label>
+              <label>
                 Energy
                 <input type="range" min="1" max="10" value={energy} onChange={(event) => setEnergy(Number(event.target.value))} />
                 <span>{energy}/10</span>
@@ -489,8 +520,8 @@ export default function Home() {
                 <XAxis dataKey="day" />
                 <YAxis />
                 <Tooltip />
-                <Line type="monotone" dataKey="mood" stroke="#1f7a8c" strokeWidth={2} />
-                <Line type="monotone" dataKey="stress" stroke="#b23a48" strokeWidth={2} />
+                <Line type="monotone" dataKey="mood" stroke="#1f7a8c" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="stress" stroke="#b23a48" strokeWidth={2} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -502,7 +533,7 @@ export default function Home() {
                 <XAxis dataKey="day" />
                 <YAxis />
                 <Tooltip />
-                <Area type="monotone" dataKey="sleep" stroke="#3d405b" fill="#81b29a" fillOpacity={0.35} />
+                <Area type="monotone" dataKey="sleep" stroke="#3d405b" fill="#81b29a" fillOpacity={0.35} dot={{ r: 4 }} activeDot={{ r: 6 }} />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -550,4 +581,39 @@ function formatApiError(data: Record<string, unknown>, fallback: string) {
 function isAuthExpired(data: Record<string, unknown>) {
   const message = data.message;
   return typeof message === "string" && message.toLowerCase().includes("expired bearer token");
+}
+
+function chartPointFromTimeline(entry: TimelineEntry, index: number): ChartPoint {
+  return chartPoint({
+    occurredAt: entry.occurredAt,
+    structured: entry.structuredJson,
+    extraction: entry.extraction?.extractedJson,
+    entryNumber: index + 1
+  });
+}
+
+function chartPoint(input: {
+  occurredAt: string;
+  structured?: Record<string, unknown>;
+  extraction?: Record<string, unknown>;
+  entryNumber: number;
+}): ChartPoint {
+  const occurredAt = new Date(input.occurredAt);
+  const moodValue = String(input.structured?.mood ?? input.extraction?.mood ?? "");
+  return {
+    day: `${occurredAt.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${occurredAt.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit"
+    })}`,
+    entry: input.entryNumber,
+    sleep: toChartNumber(input.extraction?.sleepHours ?? input.structured?.sleepHours),
+    stress: toChartNumber(input.structured?.stress),
+    mood: moodScores[moodValue] ?? (input.extraction?.fatigue ? 4 : 7)
+  };
+}
+
+function toChartNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue) ? numberValue : null;
 }
