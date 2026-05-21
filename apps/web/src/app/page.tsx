@@ -116,7 +116,8 @@ type InsightSummary = {
   averageStress: number | null;
   averageMood: number | null;
   commonSignals: string[];
-  notes: string[];
+  summary: string;
+  attentionAreas: string[];
 };
 
 export default function Home() {
@@ -657,11 +658,18 @@ export default function Home() {
                 <p>
                   Common signals: {insightSummary.commonSignals.length ? insightSummary.commonSignals.join(", ") : "not enough repeated signals yet"}.
                 </p>
-                <ul>
-                  {insightSummary.notes.map((note) => (
-                    <li key={note}>{note}</li>
-                  ))}
-                </ul>
+                <div className="user-summary">
+                  <strong>Summary</strong>
+                  <p>{insightSummary.summary}</p>
+                </div>
+                <div className="attention-areas">
+                  <strong>Areas to pay attention to</strong>
+                  <div>
+                    {insightSummary.attentionAreas.map((area) => (
+                      <span key={area}>{area}</span>
+                    ))}
+                  </div>
+                </div>
                 <em>Informational trend summary only. It cannot diagnose conditions or establish medical cause.</em>
               </div>
             </>
@@ -923,33 +931,48 @@ function buildInsightSummary(entries: TimelineEntry[]): InsightSummary {
     averageStress,
     averageMood,
     commonSignals,
-    notes: buildInsightNotes(entries, { averageSleep, averageStress, averageMood }, signalCounts)
+    summary: buildUserFacingSummary(entries, { averageSleep, averageStress, averageMood }, commonSignals),
+    attentionAreas: buildAttentionAreas(entries, { averageSleep, averageStress, averageMood }, signalCounts)
   };
 }
 
-function buildInsightNotes(
+function buildUserFacingSummary(
+  entries: TimelineEntry[],
+  averages: Pick<InsightSummary, "averageSleep" | "averageStress" | "averageMood">,
+  commonSignals: string[]
+) {
+  const sleepText = averages.averageSleep === null ? "sleep data was limited" : `sleep averaged ${averages.averageSleep.toFixed(1)} hours`;
+  const stressText = averages.averageStress === null ? "stress data was limited" : `stress averaged ${averages.averageStress.toFixed(1)}/10`;
+  const moodText = averages.averageMood === null ? "mood data was limited" : `mood averaged ${averages.averageMood.toFixed(1)}/10`;
+  const signalText = commonSignals.length ? `The most repeated signals were ${commonSignals.join(", ")}.` : "There were not enough repeated AI-observed signals yet.";
+
+  return `Over this range, you logged ${entries.length} entr${entries.length === 1 ? "y" : "ies"}. ${capitalizeSentence(sleepText)}, ${stressText}, and ${moodText}. ${signalText} These patterns do not diagnose a condition, but they may be worth reflecting on or discussing with a healthcare professional if they feel persistent, worsening, or disruptive.`;
+}
+
+function buildAttentionAreas(
   entries: TimelineEntry[],
   averages: Pick<InsightSummary, "averageSleep" | "averageStress" | "averageMood">,
   signalCounts: Record<string, number>
 ) {
-  const notes: string[] = [];
+  const areas: string[] = [];
   if (entries.length < 3) {
-    notes.push("A few more entries will make patterns more reliable.");
+    areas.push("More entries for clearer patterns");
   }
   if (averages.averageSleep !== null && averages.averageSleep < 6.5) {
-    notes.push("Sleep is averaging below 6.5 hours in this range.");
+    areas.push("Sleep below 6.5 hours");
   }
   if (averages.averageStress !== null && averages.averageStress >= 7) {
-    notes.push("Stress is averaging high in this range.");
+    areas.push("High stress average");
   }
   if (averages.averageMood !== null && averages.averageMood <= 4.5) {
-    notes.push("Mood entries are trending on the lower side in this range.");
+    areas.push("Lower mood pattern");
   }
-  const topSignal = Object.entries(signalCounts).sort((a, b) => b[1] - a[1])[0];
-  if (topSignal) {
-    notes.push(`${humanize(topSignal[0])} is the most repeated AI-observed signal.`);
+  for (const [signal, count] of Object.entries(signalCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+    if (count >= 2) {
+      areas.push(`Repeated ${humanize(signal)}`);
+    }
   }
-  return notes.length ? notes : ["No strong repeated pattern is visible yet in this range."];
+  return areas.length ? areas : ["No strong repeated pattern yet"];
 }
 
 function countTimelineSignals(entries: TimelineEntry[]) {
@@ -1009,4 +1032,8 @@ function humanize(value: string) {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function capitalizeSentence(value: string) {
+  return value ? `${value[0].toUpperCase()}${value.slice(1)}` : value;
 }

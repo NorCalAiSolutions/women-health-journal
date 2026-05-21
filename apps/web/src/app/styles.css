@@ -619,6 +619,42 @@ pre {
   font-size: 0.9rem;
 }
 
+.user-summary,
+.attention-areas {
+  display: grid;
+  gap: 8px;
+}
+
+.user-summary strong,
+.attention-areas strong {
+  color: var(--teal);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.user-summary p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.55;
+  font-size: 0.94rem;
+}
+
+.attention-areas div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.attention-areas span {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  padding: 7px 9px;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .recharts-wrapper,
 .recharts-surface {
   font-family: "Courier New", Courier, monospace;
