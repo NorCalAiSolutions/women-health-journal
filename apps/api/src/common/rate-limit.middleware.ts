@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextFunction, Request, Response } from "express";
+import { requestId } from "./request-logging.middleware";
 
 type RateLimitRule = {
   name: string;
@@ -136,6 +137,7 @@ export function rateLimitMiddleware() {
         statusCode: 429,
         error: "Too Many Requests",
         message: rule.message,
+        requestId: requestId(req),
         retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000)
       });
     }

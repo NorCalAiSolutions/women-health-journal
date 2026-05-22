@@ -967,9 +967,10 @@ function authHeaders(token: string) {
 
 function formatApiError(data: Record<string, unknown>, fallback: string) {
   const message = data.message;
-  if (Array.isArray(message)) return message.join(" ");
-  if (typeof message === "string") return message;
-  return fallback;
+  const requestId = typeof data.requestId === "string" ? ` Reference ID: ${data.requestId}` : "";
+  if (Array.isArray(message)) return `${message.join(" ")}${requestId}`;
+  if (typeof message === "string") return `${message}${requestId}`;
+  return `${fallback}${requestId}`;
 }
 
 function isAuthExpired(data: Record<string, unknown>) {
