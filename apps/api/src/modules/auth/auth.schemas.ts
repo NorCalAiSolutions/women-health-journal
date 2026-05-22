@@ -27,8 +27,16 @@ export const ResetPasswordSchema = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters.").max(200)
 });
 
+export const AcceptPolicyConsentsSchema = z.object({
+  termsAccepted: z.literal(true),
+  privacyAccepted: z.literal(true),
+  aiDisclosureAccepted: z.literal(true),
+  dataRightsAccepted: z.literal(true)
+});
+
 export type RegisterInput = z.infer<typeof RegisterSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type VerifyEmailInput = z.infer<typeof VerifyEmailSchema>;
 export type RequestPasswordResetInput = z.infer<typeof RequestPasswordResetSchema>;
 export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;
+export type AcceptPolicyConsentsInput = z.infer<typeof AcceptPolicyConsentsSchema>;

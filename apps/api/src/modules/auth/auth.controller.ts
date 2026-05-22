@@ -6,6 +6,7 @@ import { CurrentUser } from "./current-user.decorator";
 import { JwtAuthGuard } from "./jwt-auth.guard";
 import { AuthService } from "./auth.service";
 import {
+  AcceptPolicyConsentsSchema,
   LoginSchema,
   RegisterSchema,
   RequestPasswordResetSchema,
@@ -49,6 +50,18 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser("sub") userId: string) {
     return this.auth.me(userId);
+  }
+
+  @Get("consent-status")
+  @UseGuards(JwtAuthGuard)
+  consentStatus(@CurrentUser("sub") userId: string) {
+    return this.auth.policyConsentStatus(userId);
+  }
+
+  @Post("consents/policy")
+  @UseGuards(JwtAuthGuard)
+  acceptPolicyConsents(@CurrentUser("sub") userId: string, @Body() body: unknown, @Req() req: Request) {
+    return this.auth.acceptPolicyConsents(userId, parseZod(AcceptPolicyConsentsSchema, body), this.audit.contextFromRequest(req));
   }
 
   @Get("account-export")

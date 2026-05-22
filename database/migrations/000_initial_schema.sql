@@ -1,11 +1,5 @@
 CREATE SCHEMA IF NOT EXISTS whjournal;
 
-CREATE TABLE IF NOT EXISTS whjournal.schema_migrations (
-  filename text PRIMARY KEY,
-  checksum text NOT NULL,
-  applied_at timestamptz NOT NULL DEFAULT now()
-);
-
 CREATE TABLE IF NOT EXISTS whjournal.users (
   id text PRIMARY KEY,
   login_id text UNIQUE,
@@ -17,12 +11,6 @@ CREATE TABLE IF NOT EXISTS whjournal.users (
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz
 );
-
-ALTER TABLE whjournal.users
-  ADD COLUMN IF NOT EXISTS login_id text;
-
-ALTER TABLE whjournal.users
-  ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_login_id_unique_idx
   ON whjournal.users(login_id)
@@ -55,17 +43,7 @@ CREATE INDEX IF NOT EXISTS password_reset_codes_lookup_idx
 CREATE TABLE IF NOT EXISTS whjournal.consents (
   id text PRIMARY KEY,
   user_id text NOT NULL REFERENCES whjournal.users(id) ON DELETE CASCADE,
-  scope text NOT NULL CHECK (
-    scope IN (
-      'AI_ANALYSIS',
-      'EXPORTS',
-      'RESEARCH_OPT_IN',
-      'TERMS_OF_USE',
-      'PRIVACY_POLICY',
-      'AI_DISCLOSURE',
-      'DATA_RIGHTS'
-    )
-  ),
+  scope text NOT NULL CHECK (scope IN ('AI_ANALYSIS', 'EXPORTS', 'RESEARCH_OPT_IN')),
   granted boolean NOT NULL,
   version text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
@@ -95,23 +73,6 @@ CREATE TABLE IF NOT EXISTS whjournal.ai_extractions (
   confidence double precision NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
-ALTER TABLE whjournal.ai_extractions
-  ADD COLUMN IF NOT EXISTS analysis_source text NOT NULL DEFAULT 'unknown';
-
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1
-    FROM pg_constraint
-    WHERE conname = 'ai_extractions_analysis_source_check'
-      AND conrelid = 'whjournal.ai_extractions'::regclass
-  ) THEN
-    ALTER TABLE whjournal.ai_extractions
-      ADD CONSTRAINT ai_extractions_analysis_source_check
-      CHECK (analysis_source IN ('openai_llm', 'local_fallback', 'unknown'));
-  END IF;
-END $$;
 
 CREATE TABLE IF NOT EXISTS whjournal.pattern_observations (
   id text PRIMARY KEY,

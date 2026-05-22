@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, BookOpen, Download, Eye, EyeOff, KeyRound, Lock, LogOut, Send, ShieldCheck, Sparkles, Trash2, UserPlus } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, Download, Eye, EyeOff, FileText, KeyRound, Lock, LogOut, Send, ShieldCheck, Sparkles, Trash2, UserPlus } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -21,6 +21,8 @@ type TimelineEntry = {
   occurredAt: string;
   structuredJson?: Record<string, number | string | undefined>;
   extraction?: {
+    analysisSource?: string;
+    model?: string | null;
     extractedJson?: {
       fatigue?: boolean;
       acne?: boolean;
@@ -39,6 +41,8 @@ type JournalDetail = {
   rawText: string;
   structured?: Record<string, unknown>;
   extraction?: Record<string, unknown>;
+  analysisSource?: string;
+  analysisModel?: string | null;
   redFlags?: unknown[];
 };
 
@@ -68,6 +72,8 @@ type RedFlag = {
 
 type JournalSubmitResult = {
   extraction?: Record<string, unknown>;
+  analysisSource?: string;
+  analysisModel?: string | null;
   redFlags?: RedFlag[];
   disclaimer?: string;
 };
@@ -76,6 +82,15 @@ type AuthUser = {
   id?: string;
   userId?: string;
   displayName?: string;
+  policyConsent?: PolicyConsentStatus;
+};
+
+type PolicyConsentStatus = {
+  required: boolean;
+  version: string;
+  missingScopes: string[];
+  acceptedScopes: string[];
+  acceptedAt?: string | null;
 };
 
 const starterTimeline = [
@@ -130,6 +145,13 @@ export default function Home() {
   const [showPassword, setShowPassword] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [signedInUser, setSignedInUser] = useState<AuthUser | null>(null);
+  const [policyConsent, setPolicyConsent] = useState<PolicyConsentStatus | null>(null);
+  const [policyChecks, setPolicyChecks] = useState({
+    termsAccepted: false,
+    privacyAccepted: false,
+    aiDisclosureAccepted: false,
+    dataRightsAccepted: false
+  });
   const [authMessage, setAuthMessage] = useState("");
   const [rawText, setRawText] = useState("");
   const [sleepHours, setSleepHours] = useState("");
@@ -170,10 +192,15 @@ export default function Home() {
   }, [timeline, token]);
 
   const insightSummary = useMemo(() => buildInsightSummary(timeline), [timeline]);
+  const needsPolicyConsent = Boolean(token && policyConsent?.required);
 
   async function submitJournal() {
     if (!token) {
       setAuthMessage("Please log in before submitting a journal entry.");
+      return;
+    }
+    if (needsPolicyConsent) {
+      setJournalMessage("Please review and accept the privacy and terms acknowledgements before journaling.");
       return;
     }
     if (!rawText.trim()) {
@@ -250,8 +277,27 @@ export default function Home() {
       headers: { Authorization: `Bearer ${activeToken}` }
     });
     if (response.ok) {
-      setSignedInUser(await response.json());
+      const user = await response.json();
+      setSignedInUser(user);
+      setPolicyConsent(user.policyConsent ?? null);
     }
+  }
+
+  async function acceptPolicyConsents() {
+    if (!token) return;
+    setAuthMessage("");
+    const response = await fetch(`${API_URL}/auth/consents/policy`, {
+      method: "POST",
+      headers: authHeaders(token),
+      body: JSON.stringify(policyChecks)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setAuthMessage(formatApiError(data, "Please accept all required acknowledgements."));
+      return;
+    }
+    setPolicyConsent(data as PolicyConsentStatus);
+    setAuthMessage("Privacy and terms acknowledgements saved.");
   }
 
   async function submitAuth() {
@@ -375,6 +421,13 @@ export default function Home() {
     localStorage.removeItem("whjc_access_token");
     setToken(null);
     setSignedInUser(null);
+    setPolicyConsent(null);
+    setPolicyChecks({
+      termsAccepted: false,
+      privacyAccepted: false,
+      aiDisclosureAccepted: false,
+      dataRightsAccepted: false
+    });
     setAuthUserId("");
     setAuthEmail("");
     setAuthCode("");
@@ -528,13 +581,65 @@ export default function Home() {
           </div>
         </section>
 
+        {needsPolicyConsent && (
+          <section className="panel policy-panel">
+            <div className="panel-title">
+              <FileText aria-hidden />
+              <h2>Privacy, Terms, and AI Use</h2>
+            </div>
+            <p>
+              Please review these acknowledgements before journaling. Version {policyConsent?.version}. This app supports wellness pattern awareness only and is not a medical diagnostic tool.
+            </p>
+            <div className="policy-grid">
+              <article>
+                <strong>Privacy Policy</strong>
+                <span>Journal text is encrypted at rest. You control account export and deletion. The app does not use ad targeting.</span>
+              </article>
+              <article>
+                <strong>Terms of Use</strong>
+                <span>Insights are informational and may be incomplete or inaccurate. They are not a substitute for professional medical care.</span>
+              </article>
+              <article>
+                <strong>AI Disclosure</strong>
+                <span>When AI analysis is enabled, journal text and structured fields are sent to the configured AI provider to extract wellness observations.</span>
+              </article>
+              <article>
+                <strong>Safety Limits</strong>
+                <span>The app cannot monitor emergencies. If you may be in immediate danger, contact emergency services or a crisis resource.</span>
+              </article>
+            </div>
+            <div className="policy-checks">
+              <label>
+                <input type="checkbox" checked={policyChecks.termsAccepted} onChange={(event) => setPolicyChecks((value) => ({ ...value, termsAccepted: event.target.checked }))} />
+                I agree to the Terms of Use.
+              </label>
+              <label>
+                <input type="checkbox" checked={policyChecks.privacyAccepted} onChange={(event) => setPolicyChecks((value) => ({ ...value, privacyAccepted: event.target.checked }))} />
+                I understand the Privacy Policy and how my data is stored, exported, and deleted.
+              </label>
+              <label>
+                <input type="checkbox" checked={policyChecks.aiDisclosureAccepted} onChange={(event) => setPolicyChecks((value) => ({ ...value, aiDisclosureAccepted: event.target.checked }))} />
+                I understand AI analysis is optional per entry and does not diagnose conditions.
+              </label>
+              <label>
+                <input type="checkbox" checked={policyChecks.dataRightsAccepted} onChange={(event) => setPolicyChecks((value) => ({ ...value, dataRightsAccepted: event.target.checked }))} />
+                I understand I can export or delete my account data.
+              </label>
+            </div>
+            <button onClick={acceptPolicyConsents} disabled={!allPolicyChecksAccepted(policyChecks)}>
+              <ShieldCheck aria-hidden />
+              Accept and Continue
+            </button>
+          </section>
+        )}
+
         <section className="grid">
           <div className="panel journal-panel" id="journal">
             <div className="panel-title">
               <Sparkles aria-hidden />
               <h2>Today&apos;s Entry</h2>
             </div>
-            <textarea value={rawText} onChange={(event) => setRawText(event.target.value)} aria-label="Daily journal entry" />
+            <textarea value={rawText} onChange={(event) => setRawText(event.target.value)} aria-label="Daily journal entry" disabled={needsPolicyConsent} />
             <div className="sample-note">
               <strong>Sample entry:</strong>
               <span>{sampleJournalText}</span>
@@ -571,7 +676,7 @@ export default function Home() {
               <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
               Analyze this entry with AI and store normalized observations.
             </label>
-            <button onClick={submitJournal} disabled={isSubmitting}>
+            <button onClick={submitJournal} disabled={isSubmitting || needsPolicyConsent}>
               <Send aria-hidden />
               {isSubmitting ? "Analyzing" : "Submit Entry"}
             </button>
@@ -588,6 +693,12 @@ export default function Home() {
             <div className="panel-title">
               <Activity aria-hidden />
               <h2>AI Extraction</h2>
+            </div>
+            <div className="analysis-meta">
+              <span className={`analysis-badge source-${result?.analysisSource ?? "sample"}`}>
+                {result?.analysisSource ? formatAnalysisSource(result.analysisSource) : "Sample output"}
+              </span>
+              {result?.analysisModel && <small>{result.analysisModel}</small>}
             </div>
             <pre>{result?.extraction ? JSON.stringify(result.extraction, null, 2) : `Sample output\n${JSON.stringify(sampleExtraction, null, 2)}`}</pre>
           </div>
@@ -693,6 +804,7 @@ export default function Home() {
                     {entry.extraction?.extractedJson?.acne ? "acne " : ""}
                     {entry.extraction?.extractedJson?.cycleIrregularity ? "cycle " : ""}
                     {!entry.extraction?.extractedJson ? "saved entry" : ""}
+                    {entry.extraction?.analysisSource ? `- ${formatAnalysisSource(entry.extraction.analysisSource)}` : ""}
                   </small>
                 </button>
               ))}
@@ -717,6 +829,12 @@ export default function Home() {
                 <div className="signal-list">
                   <strong>AI signals</strong>
                   <span>{extractSignalNames(selectedEntry.extraction).join(", ") || "No AI signals available"}</span>
+                </div>
+                <div className="analysis-meta">
+                  <span className={`analysis-badge source-${selectedEntry.analysisSource ?? "not_analyzed"}`}>
+                    {formatAnalysisSource(selectedEntry.analysisSource)}
+                  </span>
+                  {selectedEntry.analysisModel && <small>{selectedEntry.analysisModel}</small>}
                 </div>
                 <p>{selectedEntry.rawText}</p>
                 <details>
@@ -859,6 +977,15 @@ function isAuthExpired(data: Record<string, unknown>) {
   return typeof message === "string" && message.toLowerCase().includes("expired bearer token");
 }
 
+function allPolicyChecksAccepted(checks: {
+  termsAccepted: boolean;
+  privacyAccepted: boolean;
+  aiDisclosureAccepted: boolean;
+  dataRightsAccepted: boolean;
+}) {
+  return checks.termsAccepted && checks.privacyAccepted && checks.aiDisclosureAccepted && checks.dataRightsAccepted;
+}
+
 function chartPointFromTimeline(entry: TimelineEntry, index: number): ChartPoint {
   return chartPoint({
     occurredAt: entry.occurredAt,
@@ -993,7 +1120,8 @@ function entrySummaryItems(entry: JournalDetail) {
     { label: "Mood", value: humanize(String(structured.mood ?? extraction.mood ?? "not entered")) },
     { label: "Energy", value: formatUnknown(structured.energy, "/10") },
     { label: "Stress", value: formatUnknown(structured.stress, "/10") },
-    { label: "Confidence", value: formatConfidence(extraction.confidence) }
+    { label: "Confidence", value: formatConfidence(extraction.confidence) },
+    { label: "Analysis", value: formatAnalysisSource(entry.analysisSource) }
   ];
 }
 
@@ -1024,6 +1152,14 @@ function formatUnknown(value: unknown, suffix = "") {
 function formatConfidence(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? `${Math.round(numberValue * 100)}%` : "n/a";
+}
+
+function formatAnalysisSource(value: unknown) {
+  if (value === "openai_llm") return "OpenAI LLM";
+  if (value === "local_fallback") return "Local fallback";
+  if (value === "not_requested" || value === "not_analyzed") return "Not analyzed";
+  if (value === "unknown") return "Unknown source";
+  return "Not analyzed";
 }
 
 function humanize(value: string) {

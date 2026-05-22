@@ -27,7 +27,8 @@ FROM (
     ('pattern_observations'),
     ('red_flag_events'),
     ('doctor_exports'),
-    ('audit_events')
+    ('audit_events'),
+    ('schema_migrations')
 ) AS expected(table_name)
 LEFT JOIN information_schema.tables actual
   ON actual.table_schema = 'whjournal'
@@ -53,4 +54,11 @@ FROM information_schema.columns
 WHERE table_schema = 'whjournal'
   AND table_name = 'users'
   AND column_name IN ('id', 'login_id', 'email', 'email_verified_at', 'password_hash')
+ORDER BY column_name;
+
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'whjournal'
+  AND table_name = 'ai_extractions'
+  AND column_name IN ('id', 'journal_entry_id', 'model', 'analysis_source', 'extracted_json', 'confidence')
 ORDER BY column_name;

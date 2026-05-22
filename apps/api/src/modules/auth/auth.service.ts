@@ -7,12 +7,16 @@ import { CryptoService } from "../../common/crypto.service";
 import { DatabaseService } from "../../common/database.service";
 import { EmailService } from "../../common/email.service";
 import {
+  AcceptPolicyConsentsInput,
   LoginInput,
   RegisterInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
   VerifyEmailInput
 } from "./auth.schemas";
+
+const POLICY_VERSION = "2026-05-22";
+const REQUIRED_POLICY_SCOPES = ["TERMS_OF_USE", "PRIVACY_POLICY", "AI_DISCLOSURE", "DATA_RIGHTS"] as const;
 
 type UserRow = {
   id: string;
@@ -150,8 +154,46 @@ export class AuthService {
       id: user.id,
       userId: user.login_id,
       email: user.email,
-      displayName: user.display_name
+      displayName: user.display_name,
+      policyConsent: await this.policyConsentStatus(userId)
     };
+  }
+
+  async policyConsentStatus(userId: string) {
+    const result = await this.db.query<{ scope: string; version: string; created_at: Date }>(
+      `SELECT DISTINCT ON (scope) scope, version, created_at
+       FROM ${this.db.table("consents")}
+       WHERE user_id = $1
+         AND scope = ANY($2::text[])
+         AND granted = true
+       ORDER BY scope, created_at DESC`,
+      [userId, REQUIRED_POLICY_SCOPES]
+    );
+    const accepted = new Map(result.rows.map((row) => [row.scope, row]));
+    const missingScopes = REQUIRED_POLICY_SCOPES.filter((scope) => accepted.get(scope)?.version !== POLICY_VERSION);
+
+    return {
+      required: missingScopes.length > 0,
+      version: POLICY_VERSION,
+      missingScopes,
+      acceptedScopes: REQUIRED_POLICY_SCOPES.filter((scope) => accepted.get(scope)?.version === POLICY_VERSION),
+      acceptedAt: result.rows
+        .filter((row) => row.version === POLICY_VERSION)
+        .map((row) => row.created_at)
+        .sort((left, right) => right.getTime() - left.getTime())[0] ?? null
+    };
+  }
+
+  async acceptPolicyConsents(userId: string, _input: AcceptPolicyConsentsInput, context?: AuditContext) {
+    for (const scope of REQUIRED_POLICY_SCOPES) {
+      await this.db.query(
+        `INSERT INTO ${this.db.table("consents")} (id, user_id, scope, granted, version)
+         VALUES ($1, $2, $3, true, $4)`,
+        [this.db.id(), userId, scope, POLICY_VERSION]
+      );
+    }
+    await this.audit.log(userId, "POLICY_CONSENTS_ACCEPTED", { version: POLICY_VERSION, scopes: REQUIRED_POLICY_SCOPES }, context);
+    return this.policyConsentStatus(userId);
   }
 
   async exportAccount(userId: string, context?: AuditContext) {
@@ -174,6 +216,8 @@ export class AuthService {
       raw_text_nonce: string;
       structured_json: Record<string, unknown>;
       extracted_json: Record<string, unknown> | null;
+      analysis_source: string | null;
+      model: string | null;
       red_flags: unknown[];
     }>(
       `SELECT
@@ -184,6 +228,8 @@ export class AuthService {
          je.raw_text_nonce,
          je.structured_json,
          ae.extracted_json,
+         ae.analysis_source,
+         ae.model,
          COALESCE(jsonb_agg(jsonb_build_object(
            'category', rfe.category,
            'severity', rfe.severity,
@@ -195,7 +241,7 @@ export class AuthService {
        LEFT JOIN ${this.db.table("ai_extractions")} ae ON ae.journal_entry_id = je.id
        LEFT JOIN ${this.db.table("red_flag_events")} rfe ON rfe.journal_entry_id = je.id
        WHERE je.user_id = $1
-       GROUP BY je.id, je.occurred_at, je.created_at, je.raw_text_ciphertext, je.raw_text_nonce, je.structured_json, ae.extracted_json
+       GROUP BY je.id, je.occurred_at, je.created_at, je.raw_text_ciphertext, je.raw_text_nonce, je.structured_json, ae.extracted_json, ae.analysis_source, ae.model
        ORDER BY je.occurred_at ASC`,
       [userId]
     );
@@ -234,7 +280,13 @@ export class AuthService {
         createdAt: entry.created_at,
         rawText: this.crypto.decrypt(entry.raw_text_ciphertext, entry.raw_text_nonce),
         structured: entry.structured_json,
-        aiExtraction: entry.extracted_json,
+        aiExtraction: entry.extracted_json
+          ? {
+              analysisSource: entry.analysis_source ?? "unknown",
+              model: entry.model ?? "unknown",
+              extractedJson: entry.extracted_json
+            }
+          : null,
         redFlags: entry.red_flags
       }))
     };

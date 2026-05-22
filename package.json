@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev -w @whjc/api\" \"npm run dev -w @whjc/web\"",
+    "db:migrate": "node database/run-migrations.mjs",
     "build": "npm run build -w @whjc/shared && npm run build -w @whjc/api && npm run build -w @whjc/web",
     "lint": "npm run lint -w @whjc/api && npm run lint -w @whjc/web",
     "test": "npm run test -w @whjc/api"

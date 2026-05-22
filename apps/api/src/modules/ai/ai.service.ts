@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import OpenAI from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 import {
@@ -10,29 +10,59 @@ import {
 } from "@whjc/shared";
 import { INSIGHT_SYSTEM_PROMPT, JOURNAL_EXTRACTION_SYSTEM_PROMPT } from "./prompts";
 
+export type JournalAnalysisResult = {
+  observation: ExtractedObservation;
+  analysisSource: "openai_llm" | "local_fallback";
+  model: string;
+};
+
 @Injectable()
 export class AiService {
+  private readonly logger = new Logger(AiService.name);
   private readonly model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
   private client?: OpenAI;
 
-  async extractJournal(rawText: string, structured?: Partial<StructuredEntry>): Promise<ExtractedObservation> {
+  async extractJournal(rawText: string, structured?: Partial<StructuredEntry>): Promise<JournalAnalysisResult> {
     if (!process.env.OPENAI_API_KEY) {
-      return this.localFallbackExtraction(rawText, structured);
+      return {
+        observation: this.localFallbackExtraction(rawText, structured),
+        analysisSource: "local_fallback",
+        model: "local-fallback"
+      };
     }
 
-    const response = await this.openai().responses.parse({
-      model: this.model,
-      input: [
-        { role: "system", content: JOURNAL_EXTRACTION_SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: JSON.stringify({ rawText, structured: structured ?? {} })
-        }
-      ],
-      text: { format: zodTextFormat(ExtractedObservationSchema, "journal_extraction") }
-    });
+    try {
+      const response = await this.openai().responses.parse({
+        model: this.model,
+        input: [
+          { role: "system", content: JOURNAL_EXTRACTION_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: JSON.stringify({ rawText, structured: structured ?? {} })
+          }
+        ],
+        text: { format: zodTextFormat(ExtractedObservationSchema, "journal_extraction") }
+      });
 
-    return ExtractedObservationSchema.parse(response.output_parsed);
+      return {
+        observation: ExtractedObservationSchema.parse(response.output_parsed),
+        analysisSource: "openai_llm",
+        model: this.model
+      };
+    } catch (error) {
+      this.logger.warn(`OpenAI journal extraction failed; using local fallback. ${this.errorSummary(error)}`);
+      return {
+        observation: {
+          ...this.localFallbackExtraction(rawText, structured),
+          limitations: [
+            "OpenAI analysis was unavailable for this entry, so local keyword extraction was used.",
+            "Fallback keyword extraction is less reliable than model-based structured extraction."
+          ]
+        },
+        analysisSource: "local_fallback",
+        model: "local-fallback"
+      };
+    }
   }
 
   async generateInsight(history: unknown): Promise<Insight> {
@@ -66,6 +96,17 @@ export class AiService {
       this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
     }
     return this.client;
+  }
+
+  private errorSummary(error: unknown) {
+    if (!error || typeof error !== "object") {
+      return "Unknown error.";
+    }
+    const details = error as { status?: unknown; code?: unknown; message?: unknown };
+    const status = details.status ? `status=${details.status}` : "";
+    const code = details.code ? `code=${details.code}` : "";
+    const message = typeof details.message === "string" ? details.message : "";
+    return [status, code, message].filter(Boolean).join(" ");
   }
 
   private localFallbackExtraction(rawText: string, structured?: Partial<StructuredEntry>): ExtractedObservation {

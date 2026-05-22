@@ -11,6 +11,8 @@ type ExportEntryRow = {
   raw_text_nonce: string;
   structured_json: Record<string, unknown>;
   extracted_json: Record<string, unknown> | null;
+  analysis_source: string | null;
+  model: string | null;
   red_flags: { category: string; severity: string; guidance: string }[] | null;
 };
 
@@ -32,6 +34,8 @@ export class ExportService {
          je.raw_text_nonce,
          je.structured_json,
          ae.extracted_json,
+         ae.analysis_source,
+         ae.model,
          COALESCE(
            jsonb_agg(jsonb_build_object('category', rfe.category, 'severity', rfe.severity, 'guidance', rfe.guidance))
              FILTER (WHERE rfe.id IS NOT NULL),
@@ -41,7 +45,7 @@ export class ExportService {
        LEFT JOIN ${this.db.table("ai_extractions")} ae ON ae.journal_entry_id = je.id
        LEFT JOIN ${this.db.table("red_flag_events")} rfe ON rfe.journal_entry_id = je.id
        WHERE je.user_id = $1 AND je.occurred_at >= $2
-       GROUP BY je.id, je.occurred_at, je.raw_text_ciphertext, je.raw_text_nonce, je.structured_json, ae.extracted_json
+       GROUP BY je.id, je.occurred_at, je.raw_text_ciphertext, je.raw_text_nonce, je.structured_json, ae.extracted_json, ae.analysis_source, ae.model
        ORDER BY je.occurred_at ASC`,
       [userId, since]
     );
@@ -151,6 +155,7 @@ function writeEntrySummary(doc: PDFKit.PDFDocument, entry: ExportEntryRow & { jo
 
   doc.fontSize(11).text(formatDate(entry.occurred_at), { underline: true });
   doc.fontSize(10).text(`Structured metrics: ${metrics.length ? metrics.join("; ") : "not entered"}`);
+  doc.text(`Analysis source: ${formatAnalysisSource(entry.analysis_source)}${entry.model ? ` (${entry.model})` : ""}`);
   doc.text(`AI-observed signals: ${symptoms.length ? symptoms.join(", ") : "none available"}`);
   doc.text(`Confidence: ${formatPercent(extracted.confidence)}`);
   if (evidence.length) {
@@ -276,6 +281,12 @@ function formatMetric(label: string, value: unknown, suffix = "") {
 function formatPercent(value: unknown) {
   const numberValue = Number(value);
   return Number.isFinite(numberValue) ? `${Math.round(numberValue * 100)}%` : "not available";
+}
+
+function formatAnalysisSource(value: string | null) {
+  if (value === "openai_llm") return "OpenAI LLM";
+  if (value === "local_fallback") return "Local fallback";
+  return "Unknown";
 }
 
 function formatDate(value: Date) {
