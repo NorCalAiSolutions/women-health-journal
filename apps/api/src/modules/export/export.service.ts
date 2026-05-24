@@ -16,6 +16,20 @@ type ExportEntryRow = {
   red_flags: { category: string; severity: string; guidance: string }[] | null;
 };
 
+type CycleImportRow = {
+  normalized_json: {
+    periodStarts?: string[];
+    averageCycleLengthDays?: number | null;
+    cycleLengthRangeDays?: [number, number] | null;
+    flowNotes?: string[];
+    symptomNotes?: string[];
+    limitations?: string[];
+  };
+  confidence: number;
+  source_label: string;
+  created_at: Date;
+};
+
 @Injectable()
 export class ExportService {
   constructor(
@@ -63,6 +77,7 @@ export class ExportService {
         occurredAt: entry.occurred_at
       }))
     );
+    const cycleImport = await this.latestCycleImport(userId);
 
     await this.audit.log(
       userId,
@@ -71,6 +86,7 @@ export class ExportService {
         rangeDays: days,
         entryCount: reportEntries.length,
         redFlagCount: redFlags.length,
+        cycleImportIncluded: Boolean(cycleImport),
         format: "pdf"
       },
       context
@@ -100,6 +116,12 @@ export class ExportService {
         `Red flag events: ${redFlags.length || "none recorded"}`
       ]);
       doc.moveDown();
+
+      if (cycleImport) {
+        doc.fontSize(14).text("Imported Cycle Summary");
+        doc.fontSize(10).list(cycleSummaryLines(cycleImport));
+        doc.moveDown();
+      }
 
       doc.fontSize(14).text("Trend Notes");
       doc.fontSize(10).list(trendNotes.length ? trendNotes : ["Not enough dated entries to compare early versus recent patterns."]);
@@ -139,6 +161,18 @@ export class ExportService {
       doc.end();
     });
   }
+
+  private async latestCycleImport(userId: string) {
+    const result = await this.db.query<CycleImportRow>(
+      `SELECT normalized_json, confidence, source_label, created_at
+       FROM ${this.db.table("cycle_imports")}
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId]
+    );
+    return result.rows[0] ?? null;
+  }
 }
 
 function writeEntrySummary(doc: PDFKit.PDFDocument, entry: ExportEntryRow & { journalText: string }) {
@@ -173,6 +207,20 @@ function buildObservedSignals(entries: Array<ExportEntryRow & { journalText: str
   return Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
     .map(([symptom, count]) => `${capitalize(symptom)} appeared in ${count} entr${count === 1 ? "y" : "ies"}.`);
+}
+
+function cycleSummaryLines(row: CycleImportRow) {
+  const summary = row.normalized_json ?? {};
+  const starts = summary.periodStarts ?? [];
+  const range = summary.cycleLengthRangeDays;
+  return [
+    `Source: ${row.source_label}, imported ${formatDate(row.created_at)}.`,
+    `Average cycle length: ${summary.averageCycleLengthDays ? `${summary.averageCycleLengthDays} days` : "not enough data"}.`,
+    `Cycle length range: ${range ? `${range[0]}-${range[1]} days` : "not enough data"}.`,
+    `Recent period starts: ${starts.slice(-5).join(", ") || "none extracted"}.`,
+    `Confidence: ${formatPercent(row.confidence)}.`,
+    "Imported file identifiers were ignored before storage. The original uploaded file is not included in this report."
+  ];
 }
 
 function countSymptoms(entries: Array<ExportEntryRow & { journalText: string }>) {

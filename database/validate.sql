@@ -23,6 +23,7 @@ FROM (
     ('password_reset_codes'),
     ('consents'),
     ('journal_entries'),
+    ('cycle_imports'),
     ('ai_extractions'),
     ('pattern_observations'),
     ('red_flag_events'),
@@ -53,7 +54,18 @@ SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_schema = 'whjournal'
   AND table_name = 'users'
-  AND column_name IN ('id', 'login_id', 'email', 'email_verified_at', 'password_hash')
+  AND column_name IN (
+    'id',
+    'login_id',
+    'email',
+    'email_verified_at',
+    'password_hash',
+    'age_range',
+    'period_started_age_range',
+    'hormonal_medication_context',
+    'pregnancy_postpartum_status',
+    'cycle_baseline'
+  )
 ORDER BY column_name;
 
 SELECT column_name, data_type, is_nullable

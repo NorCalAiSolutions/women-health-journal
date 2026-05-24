@@ -25,6 +25,11 @@ type UserRow = {
   email_verified_at: Date | null;
   password_hash: string;
   display_name: string | null;
+  age_range: string | null;
+  period_started_age_range: string | null;
+  hormonal_medication_context: string | null;
+  pregnancy_postpartum_status: string | null;
+  cycle_baseline: string | null;
 };
 
 type CodeRow = {
@@ -48,18 +53,27 @@ export class AuthService {
     if (await this.findByLoginId(userId)) {
       throw new ConflictException("This user ID is already registered.");
     }
-    if (await this.findByEmail(email)) {
-      throw new ConflictException("This email is already registered.");
-    }
 
     const id = this.db.id();
     const passwordHash = await argon2.hash(input.password);
     await this.db.query(
-      `INSERT INTO ${this.db.table("users")} (id, login_id, email, password_hash, display_name)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [id, userId, email, passwordHash, input.displayName ?? userId]
+      `INSERT INTO ${this.db.table("users")}
+        (id, login_id, email, password_hash, display_name, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [
+        id,
+        userId,
+        email,
+        passwordHash,
+        input.displayName ?? userId,
+        input.ageRange ?? null,
+        input.periodStartedAgeRange ?? null,
+        input.hormonalMedicationContext ?? null,
+        input.pregnancyPostpartumStatus ?? null,
+        input.cycleBaseline ?? null
+      ]
     );
-    await this.audit.log(id, "ACCOUNT_REGISTERED", { loginId: userId, emailDomain: emailDomain(email) }, context);
+    await this.audit.log(id, "ACCOUNT_REGISTERED", { loginId: userId, emailDomain: emailDomain(email), healthContextProvided: hasHealthContext(input) }, context);
 
     const verificationCode = await this.createCode("email_verification_codes", id, 24 * 60);
     const emailSent = await this.email.sendVerificationCode(email, verificationCode);
@@ -67,7 +81,7 @@ export class AuthService {
     return {
       requiresEmailVerification: true,
       emailSent,
-      user: { userId, email, displayName: input.displayName ?? userId },
+      user: { userId, email, displayName: input.displayName ?? userId, healthContext: healthContextFromInput(input) },
       devVerificationCode: !emailSent && this.includeDevCodes() ? verificationCode : undefined
     };
   }
@@ -106,26 +120,30 @@ export class AuthService {
   }
 
   async requestPasswordReset(input: RequestPasswordResetInput, context?: AuditContext) {
-    const user = await this.findByEmail(input.email.toLowerCase());
+    const user = await this.findByLoginId(input.userId.toLowerCase());
     if (!user) {
-      await this.audit.log(null, "PASSWORD_RESET_REQUESTED", { matchedUser: false, emailDomain: emailDomain(input.email) }, context);
-      return { message: "If that email is registered, a reset code has been sent." };
+      await this.audit.log(null, "PASSWORD_RESET_REQUESTED", { matchedUser: false, attemptedLoginId: input.userId.toLowerCase(), emailDomain: emailDomain(input.email) }, context);
+      return { message: "If that user ID and email are registered, a reset code has been sent." };
+    }
+    if (user.email.toLowerCase() !== input.email.toLowerCase()) {
+      await this.audit.log(user.id, "PASSWORD_RESET_REQUESTED", { matchedUser: false, reason: "email_mismatch", emailDomain: emailDomain(input.email) }, context);
+      return { message: "If that user ID and email are registered, a reset code has been sent." };
     }
 
     const resetCode = await this.createCode("password_reset_codes", user.id, 30);
     const emailSent = await this.email.sendPasswordResetCode(user.email, resetCode);
     await this.audit.log(user.id, "PASSWORD_RESET_REQUESTED", { matchedUser: true, emailSent }, context);
     return {
-      message: "If that email is registered, a reset code has been sent.",
+      message: "If that user ID and email are registered, a reset code has been sent.",
       emailSent,
       devResetCode: !emailSent && this.includeDevCodes() ? resetCode : undefined
     };
   }
 
   async resetPassword(input: ResetPasswordInput, context?: AuditContext) {
-    const user = await this.findByEmail(input.email.toLowerCase());
-    if (!user) {
-      throw new UnauthorizedException("Invalid email or reset code.");
+    const user = await this.findByLoginId(input.userId.toLowerCase());
+    if (!user || user.email.toLowerCase() !== input.email.toLowerCase()) {
+      throw new UnauthorizedException("Invalid user ID, email, or reset code.");
     }
 
     await this.consumeCode("password_reset_codes", user.id, input.code);
@@ -142,8 +160,10 @@ export class AuthService {
   }
 
   async me(userId: string) {
-    const result = await this.db.query<Pick<UserRow, "id" | "login_id" | "display_name" | "email">>(
-      `SELECT id, login_id, display_name, email FROM ${this.db.table("users")} WHERE id = $1`,
+    const result = await this.db.query<Pick<UserRow, "id" | "login_id" | "display_name" | "email" | "age_range" | "period_started_age_range" | "hormonal_medication_context" | "pregnancy_postpartum_status" | "cycle_baseline">>(
+      `SELECT id, login_id, display_name, email, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
+       FROM ${this.db.table("users")}
+       WHERE id = $1`,
       [userId]
     );
     const user = result.rows[0];
@@ -155,6 +175,7 @@ export class AuthService {
       userId: user.login_id,
       email: user.email,
       displayName: user.display_name,
+      healthContext: healthContextFromUser(user),
       policyConsent: await this.policyConsentStatus(userId)
     };
   }
@@ -197,8 +218,8 @@ export class AuthService {
   }
 
   async exportAccount(userId: string, context?: AuditContext) {
-    const userResult = await this.db.query<Pick<UserRow, "id" | "login_id" | "email" | "display_name" | "email_verified_at"> & { created_at: Date }>(
-      `SELECT id, login_id, email, display_name, email_verified_at, created_at
+    const userResult = await this.db.query<Pick<UserRow, "id" | "login_id" | "email" | "display_name" | "email_verified_at" | "age_range" | "period_started_age_range" | "hormonal_medication_context" | "pregnancy_postpartum_status" | "cycle_baseline"> & { created_at: Date }>(
+      `SELECT id, login_id, email, display_name, email_verified_at, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline, created_at
        FROM ${this.db.table("users")}
        WHERE id = $1 AND deleted_at IS NULL`,
       [userId]
@@ -250,6 +271,13 @@ export class AuthService {
       `SELECT scope, granted, version, created_at FROM ${this.db.table("consents")} WHERE user_id = $1 ORDER BY created_at ASC`,
       [userId]
     );
+    const cycleImports = await this.db.query(
+      `SELECT id, source_type, source_label, normalized_json, confidence, ignored_identifiers_json, created_at
+       FROM ${this.db.table("cycle_imports")}
+       WHERE user_id = $1
+       ORDER BY created_at ASC`,
+      [userId]
+    );
 
     await this.audit.log(
       userId,
@@ -257,7 +285,8 @@ export class AuthService {
       {
         format: "json",
         journalEntryCount: entries.rowCount ?? entries.rows.length,
-        consentRecordCount: consents.rowCount ?? consents.rows.length
+        consentRecordCount: consents.rowCount ?? consents.rows.length,
+        cycleImportCount: cycleImports.rowCount ?? cycleImports.rows.length
       },
       context
     );
@@ -270,10 +299,20 @@ export class AuthService {
         userId: user.login_id,
         email: user.email,
         displayName: user.display_name,
+        healthContext: healthContextFromUser(user),
         emailVerifiedAt: user.email_verified_at,
         createdAt: user.created_at
       },
       consents: consents.rows,
+      cycleImports: cycleImports.rows.map((row) => ({
+        id: row.id,
+        sourceType: row.source_type,
+        sourceLabel: row.source_label,
+        normalized: row.normalized_json,
+        confidence: row.confidence,
+        ignoredIdentifiers: row.ignored_identifiers_json,
+        createdAt: row.created_at
+      })),
       journalEntries: entries.rows.map((entry) => ({
         id: entry.id,
         occurredAt: entry.occurred_at,
@@ -304,7 +343,7 @@ export class AuthService {
 
   private async findByLoginId(loginId: string) {
     const result = await this.db.query<UserRow>(
-      `SELECT id, login_id, email, email_verified_at, password_hash, display_name
+      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
        FROM ${this.db.table("users")}
        WHERE login_id = $1 AND deleted_at IS NULL`,
       [loginId]
@@ -314,7 +353,7 @@ export class AuthService {
 
   private async findByEmail(email: string) {
     const result = await this.db.query<UserRow>(
-      `SELECT id, login_id, email, email_verified_at, password_hash, display_name
+      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
        FROM ${this.db.table("users")}
        WHERE lower(email) = lower($1) AND deleted_at IS NULL`,
       [email]
@@ -403,4 +442,33 @@ export class AuthService {
 
 function emailDomain(email: string) {
   return email.split("@")[1]?.toLowerCase() ?? "unknown";
+}
+
+function healthContextFromInput(input: RegisterInput) {
+  return {
+    ageRange: input.ageRange ?? null,
+    periodStartedAgeRange: input.periodStartedAgeRange ?? null,
+    hormonalMedicationContext: input.hormonalMedicationContext ?? null,
+    pregnancyPostpartumStatus: input.pregnancyPostpartumStatus ?? null,
+    cycleBaseline: input.cycleBaseline ?? null
+  };
+}
+
+function healthContextFromUser(
+  user: Pick<
+    UserRow,
+    "age_range" | "period_started_age_range" | "hormonal_medication_context" | "pregnancy_postpartum_status" | "cycle_baseline"
+  >
+) {
+  return {
+    ageRange: user.age_range,
+    periodStartedAgeRange: user.period_started_age_range,
+    hormonalMedicationContext: user.hormonal_medication_context,
+    pregnancyPostpartumStatus: user.pregnancy_postpartum_status,
+    cycleBaseline: user.cycle_baseline
+  };
+}
+
+function hasHealthContext(input: RegisterInput) {
+  return Object.values(healthContextFromInput(input)).some(Boolean);
 }

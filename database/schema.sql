@@ -9,10 +9,15 @@ CREATE TABLE IF NOT EXISTS whjournal.schema_migrations (
 CREATE TABLE IF NOT EXISTS whjournal.users (
   id text PRIMARY KEY,
   login_id text UNIQUE,
-  email text NOT NULL UNIQUE,
+  email text NOT NULL,
   email_verified_at timestamptz,
   password_hash text NOT NULL,
   display_name text,
+  age_range text CHECK (age_range IS NULL OR age_range IN ('13_17', '18_24', '25_34', '35_44', '45_plus', 'prefer_not_to_say')),
+  period_started_age_range text CHECK (period_started_age_range IS NULL OR period_started_age_range IN ('before_10', '10_12', '13_15', '16_plus', 'not_started', 'not_sure', 'prefer_not_to_say')),
+  hormonal_medication_context text CHECK (hormonal_medication_context IS NULL OR hormonal_medication_context IN ('none', 'contraception', 'hormonal_medication', 'both', 'unsure', 'prefer_not_to_say')),
+  pregnancy_postpartum_status text CHECK (pregnancy_postpartum_status IS NULL OR pregnancy_postpartum_status IN ('not_pregnant_or_postpartum', 'pregnant', 'postpartum', 'trying_to_conceive', 'unsure', 'prefer_not_to_say')),
+  cycle_baseline text CHECK (cycle_baseline IS NULL OR cycle_baseline IN ('regular', 'somewhat_irregular', 'irregular', 'no_periods', 'not_sure', 'prefer_not_to_say')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   deleted_at timestamptz
@@ -85,6 +90,22 @@ CREATE TABLE IF NOT EXISTS whjournal.journal_entries (
 );
 
 CREATE INDEX IF NOT EXISTS journal_entries_user_occurred_idx ON whjournal.journal_entries(user_id, occurred_at);
+
+CREATE TABLE IF NOT EXISTS whjournal.cycle_imports (
+  id text PRIMARY KEY,
+  user_id text NOT NULL REFERENCES whjournal.users(id) ON DELETE CASCADE,
+  source_type text NOT NULL CHECK (source_type IN ('txt', 'csv', 'pdf')),
+  source_label text NOT NULL,
+  sanitized_text_ciphertext text NOT NULL,
+  sanitized_text_nonce text NOT NULL,
+  normalized_json jsonb NOT NULL,
+  confidence double precision NOT NULL CHECK (confidence >= 0 AND confidence <= 1),
+  ignored_identifiers_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS cycle_imports_user_created_idx
+  ON whjournal.cycle_imports(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS whjournal.ai_extractions (
   id text PRIMARY KEY,

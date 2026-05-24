@@ -4,7 +4,12 @@ export const RegisterSchema = z.object({
   userId: z.string().trim().min(3).max(80).regex(/^[a-zA-Z0-9._@-]+$/),
   email: z.string().trim().email().max(254),
   password: z.string().min(8, "Password must be at least 8 characters.").max(200),
-  displayName: z.string().trim().min(1).max(120).optional()
+  displayName: z.string().trim().min(1).max(120).optional(),
+  ageRange: z.enum(["13_17", "18_24", "25_34", "35_44", "45_plus", "prefer_not_to_say"]).optional(),
+  periodStartedAgeRange: z.enum(["before_10", "10_12", "13_15", "16_plus", "not_started", "not_sure", "prefer_not_to_say"]).optional(),
+  hormonalMedicationContext: z.enum(["none", "contraception", "hormonal_medication", "both", "unsure", "prefer_not_to_say"]).optional(),
+  pregnancyPostpartumStatus: z.enum(["not_pregnant_or_postpartum", "pregnant", "postpartum", "trying_to_conceive", "unsure", "prefer_not_to_say"]).optional(),
+  cycleBaseline: z.enum(["regular", "somewhat_irregular", "irregular", "no_periods", "not_sure", "prefer_not_to_say"]).optional()
 });
 
 export const LoginSchema = z.object({
@@ -18,10 +23,12 @@ export const VerifyEmailSchema = z.object({
 });
 
 export const RequestPasswordResetSchema = z.object({
+  userId: z.string().trim().min(3).max(80),
   email: z.string().trim().email().max(254)
 });
 
 export const ResetPasswordSchema = z.object({
+  userId: z.string().trim().min(3).max(80),
   email: z.string().trim().email().max(254),
   code: z.string().trim().min(4).max(20),
   newPassword: z.string().min(8, "Password must be at least 8 characters.").max(200)

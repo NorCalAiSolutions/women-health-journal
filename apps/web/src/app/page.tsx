@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Activity, AlertTriangle, BookOpen, Download, Eye, EyeOff, FileText, KeyRound, Lock, LogOut, Send, ShieldCheck, Sparkles, Trash2, UserPlus } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, Download, Eye, EyeOff, FileText, HelpCircle, KeyRound, Lock, LogOut, Send, ShieldCheck, Sparkles, Trash2, Upload, UserPlus, X } from "lucide-react";
 import {
   Area,
   AreaChart,
@@ -82,7 +82,16 @@ type AuthUser = {
   id?: string;
   userId?: string;
   displayName?: string;
+  healthContext?: HealthContext;
   policyConsent?: PolicyConsentStatus;
+};
+
+type HealthContext = {
+  ageRange?: string | null;
+  periodStartedAgeRange?: string | null;
+  hormonalMedicationContext?: string | null;
+  pregnancyPostpartumStatus?: string | null;
+  cycleBaseline?: string | null;
 };
 
 type PolicyConsentStatus = {
@@ -91,6 +100,26 @@ type PolicyConsentStatus = {
   missingScopes: string[];
   acceptedScopes: string[];
   acceptedAt?: string | null;
+};
+
+type CycleImportSummary = {
+  id: string;
+  sourceType: string;
+  sourceLabel: string;
+  confidence: number;
+  ignoredIdentifiers: string[];
+  createdAt: string;
+  normalized: {
+    periodStarts: string[];
+    periodEnds: string[];
+    cycleLengthsDays: number[];
+    averageCycleLengthDays: number | null;
+    cycleLengthRangeDays: [number, number] | null;
+    flowNotes: string[];
+    symptomNotes: string[];
+    importedRows: number;
+    limitations: string[];
+  };
 };
 
 const starterTimeline = [
@@ -142,6 +171,7 @@ export default function Home() {
   const [authCode, setAuthCode] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [healthContext, setHealthContext] = useState<HealthContext>({});
   const [showPassword, setShowPassword] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [signedInUser, setSignedInUser] = useState<AuthUser | null>(null);
@@ -162,7 +192,10 @@ export default function Home() {
   const [result, setResult] = useState<JournalSubmitResult | null>(null);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
   const [correlations, setCorrelations] = useState<CorrelationResult[]>([]);
+  const [cycleSummary, setCycleSummary] = useState<CycleImportSummary | null>(null);
+  const [cycleMessage, setCycleMessage] = useState("");
   const [selectedEntry, setSelectedEntry] = useState<JournalDetail | null>(null);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [trendRange, setTrendRange] = useState(90);
   const [lastSubmittedText, setLastSubmittedText] = useState("");
   const [journalMessage, setJournalMessage] = useState("");
@@ -179,9 +212,11 @@ export default function Home() {
   useEffect(() => {
     if (token) {
       void loadTimeline(token, trendRange);
+      void loadCycleSummary(token);
     } else {
       setTimeline([]);
       setCorrelations([]);
+      setCycleSummary(null);
       setSelectedEntry(null);
     }
   }, [token, trendRange]);
@@ -272,6 +307,40 @@ export default function Home() {
     }
   }
 
+  async function loadCycleSummary(activeToken: string) {
+    const response = await fetch(`${API_URL}/cycle/summary`, {
+      headers: { Authorization: `Bearer ${activeToken}` }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      setCycleSummary(data.latest ?? null);
+    }
+  }
+
+  async function uploadCycleSummary(file: File | undefined) {
+    if (!token) {
+      setAuthMessage("Please log in before importing a cycle summary.");
+      return;
+    }
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+    setCycleMessage("Importing cycle summary...");
+    const response = await fetch(`${API_URL}/cycle/import`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setCycleMessage(formatApiError(data, "Could not import this cycle summary."));
+      return;
+    }
+    setCycleSummary(data as CycleImportSummary);
+    setCycleMessage("Cycle summary imported. Identifying fields were ignored before storage.");
+  }
+
   async function loadCurrentUser(activeToken: string) {
     const response = await fetch(`${API_URL}/auth/me`, {
       headers: { Authorization: `Bearer ${activeToken}` }
@@ -323,7 +392,8 @@ export default function Home() {
           code: authCode,
           password: authMode === "login" || authMode === "register" ? authPassword : undefined,
           newPassword: authMode === "reset" ? authPassword : undefined,
-          displayName: displayName || undefined
+          displayName: displayName || undefined,
+          ...(authMode === "register" ? cleanHealthContext(healthContext) : {})
         })
       });
       data = await response.json().catch(() => ({}));
@@ -346,13 +416,14 @@ export default function Home() {
     }
     if (authMode === "forgot") {
       setAuthMode("reset");
-      setAuthMessage(data.devResetCode ? `Reset code: ${data.devResetCode}` : "Check your email for the reset code.");
+      setAuthMessage(data.devResetCode ? `Reset code: ${data.devResetCode}` : "If that user ID and email are registered, check your email for the reset code.");
       return;
     }
     const accessToken = String(data.accessToken ?? "");
     localStorage.setItem("whjc_access_token", accessToken);
     setToken(accessToken);
     setSignedInUser((data.user as AuthUser | undefined) ?? null);
+    await loadCurrentUser(accessToken);
     setAuthMessage(
       authMode === "reset"
         ? "Password reset. You are signed in."
@@ -433,6 +504,7 @@ export default function Home() {
     setAuthCode("");
     setAuthPassword("");
     setDisplayName("");
+    setHealthContext({});
     setShowPassword(false);
     setAuthMode("login");
     setAuthMessage("Signed out.");
@@ -449,6 +521,13 @@ export default function Home() {
   function switchAuthMode(mode: "login" | "register" | "verify" | "forgot" | "reset") {
     setAuthMode(mode);
     setAuthMessage("");
+  }
+
+  function updateHealthContext(key: keyof HealthContext, value: string) {
+    setHealthContext((current) => ({
+      ...current,
+      [key]: value || undefined
+    }));
   }
 
   return (
@@ -476,10 +555,89 @@ export default function Home() {
             <p className="eyebrow">Supportive pattern awareness</p>
             <h1>Daily journal and wellness trend monitor</h1>
           </div>
-          <button className="icon-button" onClick={downloadExport} id="export" title="Download doctor PDF">
-            <Download aria-hidden />
-          </button>
+          <div className="header-actions">
+            <button className="icon-button" onClick={() => setIsHelpOpen(true)} title="Help">
+              <HelpCircle aria-hidden />
+            </button>
+            <button className="icon-button" onClick={downloadExport} id="export" title="Download doctor PDF">
+              <Download aria-hidden />
+            </button>
+          </div>
         </header>
+
+        {isHelpOpen && (
+          <div className="modal-backdrop" role="presentation" onClick={() => setIsHelpOpen(false)}>
+            <section className="help-modal" role="dialog" aria-modal="true" aria-labelledby="help-title" onClick={(event) => event.stopPropagation()}>
+              <div className="help-header">
+                <div>
+                  <p className="eyebrow">App guide</p>
+                  <h2 id="help-title">What each control and section does</h2>
+                </div>
+                <button className="icon-button" onClick={() => setIsHelpOpen(false)} title="Close help">
+                  <X aria-hidden />
+                </button>
+              </div>
+              <div className="help-content">
+                <article>
+                  <h3>Buttons</h3>
+                  <dl>
+                    <dt>Help</dt>
+                    <dd>Opens this guide.</dd>
+                    <dt>Download doctor PDF</dt>
+                    <dd>Downloads an informational doctor report for the selected trend range.</dd>
+                    <dt>Log In</dt>
+                    <dd>Signs in with your private app user ID and password.</dd>
+                    <dt>Register / Create Account</dt>
+                    <dd>Creates a new private app account and sends an email verification code.</dd>
+                    <dt>Forgot my password</dt>
+                    <dd>Sends a reset code when the user ID and email match an account.</dd>
+                    <dt>Export Account Data</dt>
+                    <dd>Downloads your account, consent, journal, AI extraction, safety, and cycle import data as JSON.</dd>
+                    <dt>Import Cycle Summary</dt>
+                    <dd>Imports a TXT, CSV, or PDF cycle summary. Identifying fields are ignored and the original file is not stored.</dd>
+                    <dt>Delete Account</dt>
+                    <dd>Deletes your account and saved journal data after confirmation.</dd>
+                    <dt>Log Out</dt>
+                    <dd>Signs out and clears the sign-in fields.</dd>
+                    <dt>Submit Entry</dt>
+                    <dd>Saves today&apos;s journal entry and optionally analyzes it with AI.</dd>
+                  </dl>
+                </article>
+                <article>
+                  <h3>Sections</h3>
+                  <dl>
+                    <dt>Private App Sign-In</dt>
+                    <dd>Handles login, registration, verification, password reset, account export, cycle import, and account deletion.</dd>
+                    <dt>Privacy, Terms, and AI Use</dt>
+                    <dd>Shows required acknowledgements before journaling is enabled for the current policy version.</dd>
+                    <dt>Imported Cycle Summary</dt>
+                    <dd>Shows normalized cycle context from an imported file, including average cycle length, recent starts, confidence, and ignored identifiers.</dd>
+                    <dt>Today&apos;s Entry</dt>
+                    <dd>Where you write a journal entry and optional structured fields such as sleep, mood, energy, and stress.</dd>
+                    <dt>AI Extraction</dt>
+                    <dd>Shows normalized observations, confidence, evidence, limitations, and whether OpenAI or local fallback analyzed the entry.</dd>
+                    <dt>Safety Resources</dt>
+                    <dd>Appears when wording suggests higher support or urgent-care awareness may be important.</dd>
+                    <dt>Insights Summary</dt>
+                    <dd>Summarizes recent entries, common signals, and areas to pay attention to in the selected range.</dd>
+                    <dt>Journal History</dt>
+                    <dd>Lists saved entries. Selecting one opens it as read-only.</dd>
+                    <dt>Read-Only Entry</dt>
+                    <dd>Displays the selected historical entry, structured values, AI signals, and extraction details without allowing edits.</dd>
+                    <dt>Mood and Stress Timeline</dt>
+                    <dd>Charts mood and stress over the chosen range.</dd>
+                    <dt>Sleep Trend</dt>
+                    <dd>Charts sleep hours over the chosen range.</dd>
+                    <dt>Possible Associations</dt>
+                    <dd>Shows non-causal associations such as stress with sleep or cycle context with symptoms, based on available entries.</dd>
+                    <dt>Safety Layer</dt>
+                    <dd>Explains that the app provides awareness support only and does not diagnose or monitor emergencies.</dd>
+                  </dl>
+                </article>
+              </div>
+            </section>
+          </div>
+        )}
 
         <section className="panel auth-panel">
           <div className="panel-title">
@@ -503,6 +661,71 @@ export default function Home() {
                   Display name
                   <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" />
                 </label>
+              )}
+              {authMode === "register" && (
+                <>
+                  <label>
+                    Age range
+                    <select value={healthContext.ageRange ?? ""} onChange={(event) => updateHealthContext("ageRange", event.target.value)}>
+                      <option value="">Optional</option>
+                      <option value="13_17">13-17</option>
+                      <option value="18_24">18-24</option>
+                      <option value="25_34">25-34</option>
+                      <option value="35_44">35-44</option>
+                      <option value="45_plus">45+</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label>
+                    Period started age
+                    <select value={healthContext.periodStartedAgeRange ?? ""} onChange={(event) => updateHealthContext("periodStartedAgeRange", event.target.value)}>
+                      <option value="">Optional</option>
+                      <option value="before_10">Before 10</option>
+                      <option value="10_12">10-12</option>
+                      <option value="13_15">13-15</option>
+                      <option value="16_plus">16+</option>
+                      <option value="not_started">Not started</option>
+                      <option value="not_sure">Not sure</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label>
+                    Hormonal context
+                    <select value={healthContext.hormonalMedicationContext ?? ""} onChange={(event) => updateHealthContext("hormonalMedicationContext", event.target.value)}>
+                      <option value="">Optional</option>
+                      <option value="none">None</option>
+                      <option value="contraception">Contraception</option>
+                      <option value="hormonal_medication">Hormonal medication</option>
+                      <option value="both">Both</option>
+                      <option value="unsure">Unsure</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label>
+                    Pregnancy/postpartum
+                    <select value={healthContext.pregnancyPostpartumStatus ?? ""} onChange={(event) => updateHealthContext("pregnancyPostpartumStatus", event.target.value)}>
+                      <option value="">Optional</option>
+                      <option value="not_pregnant_or_postpartum">Not pregnant/postpartum</option>
+                      <option value="pregnant">Pregnant</option>
+                      <option value="postpartum">Postpartum</option>
+                      <option value="trying_to_conceive">Trying to conceive</option>
+                      <option value="unsure">Unsure</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label>
+                    Cycle baseline
+                    <select value={healthContext.cycleBaseline ?? ""} onChange={(event) => updateHealthContext("cycleBaseline", event.target.value)}>
+                      <option value="">Optional</option>
+                      <option value="regular">Regular</option>
+                      <option value="somewhat_irregular">Somewhat irregular</option>
+                      <option value="irregular">Irregular</option>
+                      <option value="no_periods">No periods</option>
+                      <option value="not_sure">Not sure</option>
+                      <option value="prefer_not_to_say">Prefer not to say</option>
+                    </select>
+                  </label>
+                </>
               )}
               {(authMode === "verify" || authMode === "reset") && (
                 <label>
@@ -567,6 +790,18 @@ export default function Home() {
                   <Download aria-hidden />
                   Export Account Data
                 </button>
+                <label className="file-button">
+                  <Upload aria-hidden />
+                  Import Cycle Summary
+                  <input
+                    type="file"
+                    accept=".txt,.csv,.pdf,text/plain,text/csv,application/pdf"
+                    onChange={(event) => {
+                      void uploadCycleSummary(event.target.files?.[0]);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
                 <button className="danger" onClick={deleteAccount}>
                   <Trash2 aria-hidden />
                   Delete Account
@@ -630,6 +865,46 @@ export default function Home() {
               <ShieldCheck aria-hidden />
               Accept and Continue
             </button>
+          </section>
+        )}
+
+        {token && (
+          <section className="panel cycle-panel">
+            <div className="panel-title">
+              <Upload aria-hidden />
+              <h2>Imported Cycle Summary</h2>
+            </div>
+            {!cycleSummary ? (
+              <p className="empty-state">Import a TXT, CSV, or PDF cycle summary to add optional cycle context. The original file is not stored.</p>
+            ) : (
+              <div className="cycle-summary-grid">
+                <article>
+                  <span>Source</span>
+                  <strong>{cycleSummary.sourceLabel}</strong>
+                </article>
+                <article>
+                  <span>Avg cycle</span>
+                  <strong>{cycleSummary.normalized.averageCycleLengthDays ? `${cycleSummary.normalized.averageCycleLengthDays} days` : "n/a"}</strong>
+                </article>
+                <article>
+                  <span>Range</span>
+                  <strong>{cycleSummary.normalized.cycleLengthRangeDays ? `${cycleSummary.normalized.cycleLengthRangeDays[0]}-${cycleSummary.normalized.cycleLengthRangeDays[1]} days` : "n/a"}</strong>
+                </article>
+                <article>
+                  <span>Confidence</span>
+                  <strong>{formatConfidence(cycleSummary.confidence)}</strong>
+                </article>
+                <div className="cycle-detail">
+                  <b>Recent period starts</b>
+                  <span>{cycleSummary.normalized.periodStarts.slice(-5).join(", ") || "No period start dates found"}</span>
+                </div>
+                <div className="cycle-detail">
+                  <b>Ignored identifiers</b>
+                  <span>{cycleSummary.ignoredIdentifiers.length ? cycleSummary.ignoredIdentifiers.join(", ") : "None detected"}</span>
+                </div>
+              </div>
+            )}
+            {cycleMessage && <p className="form-message">{cycleMessage}</p>}
           </section>
         )}
 
@@ -985,6 +1260,10 @@ function allPolicyChecksAccepted(checks: {
   dataRightsAccepted: boolean;
 }) {
   return checks.termsAccepted && checks.privacyAccepted && checks.aiDisclosureAccepted && checks.dataRightsAccepted;
+}
+
+function cleanHealthContext(context: HealthContext) {
+  return Object.fromEntries(Object.entries(context).filter(([, value]) => Boolean(value)));
 }
 
 function chartPointFromTimeline(entry: TimelineEntry, index: number): ChartPoint {

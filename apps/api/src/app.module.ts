@@ -8,6 +8,7 @@ import { SafetyModule } from "./modules/safety/safety.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { ExportModule } from "./modules/export/export.module";
 import { CommonModule } from "./common/common.module";
+import { CycleModule } from "./modules/cycle/cycle.module";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CommonModule } from "./common/common.module";
     PatternsModule,
     SafetyModule,
     JournalModule,
+    CycleModule,
     ExportModule
   ],
   providers: []
