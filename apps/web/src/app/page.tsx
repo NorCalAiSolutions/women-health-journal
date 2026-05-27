@@ -15,6 +15,14 @@ import {
 } from "recharts";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const cycleSampleCsv = [
+  ["Cycle Duration", "Flow", "Symptoms", "Notes"],
+  ["May 1, 2026 - May 29, 2026", "Medium", "cramps; fatigue", "Optional notes without name, DOB, phone, email, or address"],
+  ["May 30, 2026 - Jun 27, 2026", "Light", "acne; mood changes", "Cycle Duration first date is treated as the period start date"],
+  ["Jun 28, 2026 - Jul 26, 2026", "Heavy", "headache; cramps", "The app stores sanitized text only; original files are not stored"]
+]
+  .map((row) => row.map((cell) => `"${cell.replaceAll("\"", "\"\"")}"`).join(","))
+  .join("\n");
 
 type TimelineEntry = {
   id: string;
@@ -217,6 +225,7 @@ export default function Home() {
       setTimeline([]);
       setCorrelations([]);
       setCycleSummary(null);
+      setCycleMessage("");
       setSelectedEntry(null);
     }
   }, [token, trendRange]);
@@ -313,7 +322,11 @@ export default function Home() {
     });
     if (response.ok) {
       const data = await response.json();
-      setCycleSummary(data.latest ?? null);
+      const latest = data.latest ?? null;
+      setCycleSummary(latest);
+      if (!latest) {
+        setCycleMessage("");
+      }
     }
   }
 
@@ -339,6 +352,17 @@ export default function Home() {
     }
     setCycleSummary(data as CycleImportSummary);
     setCycleMessage("Cycle summary imported. Identifying fields were ignored before storage.");
+  }
+
+  function downloadCycleSample() {
+    const blob = new Blob([cycleSampleCsv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "whjc-cycle-summary-sample.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setCycleMessage("Sample CSV downloaded. Use the Cycle Duration column; the first date is the period start date.");
   }
 
   async function loadCurrentUser(activeToken: string) {
@@ -421,6 +445,8 @@ export default function Home() {
     }
     const accessToken = String(data.accessToken ?? "");
     localStorage.setItem("whjc_access_token", accessToken);
+    setCycleSummary(null);
+    setCycleMessage("");
     setToken(accessToken);
     setSignedInUser((data.user as AuthUser | undefined) ?? null);
     await loadCurrentUser(accessToken);
@@ -505,6 +531,8 @@ export default function Home() {
     setAuthPassword("");
     setDisplayName("");
     setHealthContext({});
+    setCycleSummary(null);
+    setCycleMessage("");
     setShowPassword(false);
     setAuthMode("login");
     setAuthMessage("Signed out.");
@@ -514,6 +542,8 @@ export default function Home() {
     localStorage.removeItem("whjc_access_token");
     setToken(null);
     setAuthPassword("");
+    setCycleSummary(null);
+    setCycleMessage("");
     setShowPassword(false);
     setAuthMode("login");
   }
@@ -521,6 +551,9 @@ export default function Home() {
   function switchAuthMode(mode: "login" | "register" | "verify" | "forgot" | "reset") {
     setAuthMode(mode);
     setAuthMessage("");
+    if (mode === "register" || mode === "login") {
+      setCycleMessage("");
+    }
   }
 
   function updateHealthContext(key: keyof HealthContext, value: string) {
@@ -593,8 +626,12 @@ export default function Home() {
                     <dd>Sends a reset code when the user ID and email match an account.</dd>
                     <dt>Export Account Data</dt>
                     <dd>Downloads your account, consent, journal, AI extraction, safety, and cycle import data as JSON.</dd>
-                    <dt>Import Cycle Summary</dt>
-                    <dd>Imports a TXT, CSV, or PDF cycle summary. Identifying fields are ignored and the original file is not stored.</dd>
+                    <dt>Import Apple Health Cycle</dt>
+                    <dd>Opens the cycle file picker from the sign-in action area for Apple Health-style TXT, CSV, or PDF output.</dd>
+                    <dt>Choose Apple Health File</dt>
+                    <dd>Uploads an Apple Health-style cycle summary from the Imported Cycle Summary section. Identifying fields are ignored and the original file is not stored.</dd>
+                    <dt>Download Sample CSV</dt>
+                    <dd>Downloads a small template showing the useful cycle fields. The Cycle Duration column should contain the date range, with the first date as the period start.</dd>
                     <dt>Delete Account</dt>
                     <dd>Deletes your account and saved journal data after confirmation.</dd>
                     <dt>Log Out</dt>
@@ -792,7 +829,7 @@ export default function Home() {
                 </button>
                 <label className="file-button">
                   <Upload aria-hidden />
-                  Import Cycle Summary
+                  Import Apple Health Cycle
                   <input
                     type="file"
                     accept=".txt,.csv,.pdf,text/plain,text/csv,application/pdf"
@@ -873,6 +910,32 @@ export default function Home() {
             <div className="panel-title">
               <Upload aria-hidden />
               <h2>Imported Cycle Summary</h2>
+            </div>
+            <div className="cycle-import-options">
+              <article>
+                <strong>Apple Health output</strong>
+                <span>Upload a TXT, CSV, or PDF cycle summary exported from Apple Health or a similar cycle tracking app. Name, DOB, age, contact, and identifier fields are ignored before storage.</span>
+                <label className="file-button">
+                  <Upload aria-hidden />
+                  Choose Apple Health File
+                  <input
+                    type="file"
+                    accept=".txt,.csv,.pdf,text/plain,text/csv,application/pdf"
+                    onChange={(event) => {
+                      void uploadCycleSummary(event.target.files?.[0]);
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
+              </article>
+              <article>
+                <strong>Sample input file</strong>
+                <span>Use the sample CSV if you want to provide cycle context manually. Include Cycle Duration, Flow, Symptoms, and Notes; the first date in Cycle Duration is treated as the period start date.</span>
+                <button className="secondary" onClick={downloadCycleSample}>
+                  <FileText aria-hidden />
+                  Download Sample CSV
+                </button>
+              </article>
             </div>
             {!cycleSummary ? (
               <p className="empty-state">Import a TXT, CSV, or PDF cycle summary to add optional cycle context. The original file is not stored.</p>

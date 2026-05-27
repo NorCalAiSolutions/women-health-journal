@@ -507,6 +507,39 @@ input[type="range"] {
   gap: 12px;
 }
 
+.cycle-import-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cycle-import-options article {
+  border: 1px solid var(--line);
+  background: #fffaf4;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.cycle-import-options strong {
+  color: var(--teal);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.cycle-import-options span {
+  color: var(--muted);
+  line-height: 1.45;
+  font-size: 0.88rem;
+}
+
+.cycle-import-options .file-button,
+.cycle-import-options button {
+  justify-self: start;
+}
+
 .cycle-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1002,6 +1035,7 @@ pre {
   .help-content,
   .entry-summary,
   .summary-metrics,
+  .cycle-import-options,
   .cycle-summary-grid,
   .fields,
   .policy-grid,

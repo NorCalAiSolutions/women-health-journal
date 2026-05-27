@@ -111,6 +111,8 @@ function normalizeCycleSummary(text: string): CycleNormalizedSummary {
   const flowNotes = new Set<string>();
   const symptomNotes = new Set<string>();
 
+  extractCycleDurationStarts(lines).forEach((date) => periodStarts.add(date));
+
   for (const line of lines) {
     const lower = line.toLowerCase();
     const dates = extractDates(line);
@@ -162,6 +164,76 @@ function normalizeCycleSummary(text: string): CycleNormalizedSummary {
       "This cycle summary is informational only and cannot diagnose cycle or hormone conditions."
     ]
   };
+}
+
+function extractCycleDurationStarts(lines: string[]) {
+  const starts = new Set<string>();
+
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const headerCells = splitCsvLine(lines[lineIndex]);
+    const cycleDurationIndex = headerCells.findIndex((cell) => cell.trim().toLowerCase() === "cycle duration");
+    if (cycleDurationIndex === -1) continue;
+
+    for (const rowLine of lines.slice(lineIndex + 1)) {
+      const rowCells = splitCsvLine(rowLine);
+      if (rowCells.length <= cycleDurationIndex) continue;
+
+      const start = extractFirstCycleDurationDate(rowCells[cycleDurationIndex]);
+      if (start) {
+        starts.add(start);
+      }
+    }
+  }
+
+  return Array.from(starts);
+}
+
+function splitCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === "\"" && inQuotes && next === "\"") {
+      current += "\"";
+      index += 1;
+      continue;
+    }
+
+    if (char === "\"") {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  cells.push(current.trim());
+  return cells;
+}
+
+function extractFirstCycleDurationDate(value: string) {
+  const directDates = extractDates(value);
+  if (directDates.length) return directDates[0];
+
+  const monthRange = value.match(
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})(?:,?\s+(\d{4}))?[\s\S]*?\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+(\d{4})\b/i
+  );
+  if (monthRange) {
+    const year = Number(monthRange[3] || monthRange[5]);
+    return formatDate(year, monthNumber(monthRange[1]), Number(monthRange[2]));
+  }
+
+  return "";
 }
 
 function scrubIdentifiers(text: string) {
