@@ -392,6 +392,46 @@
       line-height: 1.48;
     }
 
+    .timeline-section {
+      padding: 72px clamp(18px, 4vw, 48px) 96px;
+      background: #ffffff;
+    }
+
+    .timeline-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+      gap: clamp(28px, 5vw, 72px);
+      align-items: center;
+    }
+
+    .timeline-image {
+      border: 1px solid rgba(9, 33, 61, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fffaf5;
+      box-shadow: 0 22px 56px rgba(9, 33, 61, 0.12);
+    }
+
+    .timeline-image img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .timeline-copy {
+      max-width: 470px;
+    }
+
+    .timeline-copy p {
+      margin: 0;
+      color: #233a54;
+      font-size: clamp(1.65rem, 3vw, 2.65rem);
+      font-weight: 800;
+      line-height: 1.12;
+    }
+
     .join-section {
       padding: 56px clamp(18px, 4vw, 48px) 64px;
       background: #eef6f3;
@@ -500,6 +540,14 @@
 
       .module-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .timeline-inner {
+        grid-template-columns: 1fr;
+      }
+
+      .timeline-copy {
+        max-width: 720px;
       }
     }
 
@@ -657,6 +705,20 @@
           </div>
         </div>
       </section>
+
+      <section class="timeline-section" aria-label="Mood and stress timeline">
+        <div class="timeline-inner">
+          <div class="timeline-image">
+            <img src="moodAndStress2.png" alt="Mood and stress timeline with possible association analysis" />
+          </div>
+          <div class="timeline-copy">
+            <p>
+              Displays mood and stress timelines derived from relevant journal entries.
+              Association analysis highlights recurring patterns while emphasizing that correlation does not imply causation.
+            </p>
+          </div>
+        </div>
+      </section>
     </main>
     <footer class="site-footer">
       <p>&copy; 2026 NorCal AI Solutions LLC. All rights reserved.</p>
@@ -664,3 +726,5 @@
   </div>
 </body>
 </html>
+
+
