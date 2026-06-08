@@ -12,7 +12,7 @@ async function bootstrap() {
   app.use(requestLoggingMiddleware());
   app.use(rateLimitMiddleware());
   const configuredOrigins = process.env.WEB_ORIGIN?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? [];
-  const devOrigins = process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000", "http://127.0.0.1:3000"];
+  const devOrigins = process.env.NODE_ENV === "production" ? [] : ["http://localhost:3000", "http://127.0.0.1:3000", "null"];
   app.enableCors({
     origin: [...new Set([...configuredOrigins, ...devOrigins])],
     credentials: true

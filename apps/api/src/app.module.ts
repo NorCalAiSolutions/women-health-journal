@@ -9,6 +9,7 @@ import { AuthModule } from "./modules/auth/auth.module";
 import { ExportModule } from "./modules/export/export.module";
 import { CommonModule } from "./common/common.module";
 import { CycleModule } from "./modules/cycle/cycle.module";
+import { ContactModule } from "./modules/contact/contact.module";
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { CycleModule } from "./modules/cycle/cycle.module";
     SafetyModule,
     JournalModule,
     CycleModule,
+    ContactModule,
     ExportModule
   ],
   providers: []

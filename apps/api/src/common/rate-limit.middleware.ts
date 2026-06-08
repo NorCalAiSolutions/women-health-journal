@@ -68,6 +68,14 @@ const rules: RateLimitRule[] = [
     message: "Too many journal submissions. Please wait before saving another entry."
   },
   {
+    name: "contact",
+    method: "POST",
+    path: /^\/contact$/,
+    limit: 5,
+    windowMs: 60 * 60_000,
+    message: "Too many contact requests. Please wait before sending another message."
+  },
+  {
     name: "journal-timeline",
     method: "GET",
     path: /^\/journal\/timeline$/,

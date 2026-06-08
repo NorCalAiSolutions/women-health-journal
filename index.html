@@ -392,6 +392,176 @@
       line-height: 1.48;
     }
 
+    .timeline-section {
+      padding: 72px clamp(18px, 4vw, 48px) 96px;
+      background: #ffffff;
+    }
+
+    .timeline-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+      gap: clamp(28px, 5vw, 72px);
+      align-items: center;
+    }
+
+    .timeline-image {
+      border: 1px solid rgba(9, 33, 61, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #fffaf5;
+      box-shadow: 0 22px 56px rgba(9, 33, 61, 0.12);
+    }
+
+    .timeline-image img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .timeline-copy {
+      max-width: 470px;
+    }
+
+    .timeline-copy p {
+      margin: 0;
+      color: #233a54;
+      font-size: clamp(1.65rem, 3vw, 2.65rem);
+      font-weight: 800;
+      line-height: 1.12;
+    }
+
+    .contact-section {
+      padding: 72px clamp(18px, 4vw, 48px) 88px;
+      background: #eef6f3;
+    }
+
+    .contact-inner {
+      max-width: 1180px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+      gap: clamp(24px, 5vw, 64px);
+      align-items: start;
+    }
+
+    .contact-copy .eyebrow {
+      margin-bottom: 14px;
+    }
+
+    .contact-copy h2 {
+      max-width: 520px;
+      line-height: 1.05;
+    }
+
+    .contact-copy p {
+      max-width: 520px;
+      margin: 18px 0 0;
+      color: #405266;
+      font-size: 1.04rem;
+      line-height: 1.58;
+    }
+
+    .contact-actions {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .contact-card {
+      min-height: 220px;
+      padding: 24px;
+      border: 1px solid rgba(9, 33, 61, 0.1);
+      border-radius: 8px;
+      background: var(--white);
+      box-shadow: 0 14px 34px rgba(9, 33, 61, 0.08);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .contact-card h3 {
+      margin: 0;
+      font-size: 1.2rem;
+      line-height: 1.2;
+    }
+
+    .contact-card p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .contact-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      margin-top: auto;
+      padding: 0 18px;
+      border-radius: 8px;
+      background: var(--ink);
+      color: var(--white);
+      font-weight: 750;
+    }
+
+    .contact-button.secondary {
+      background: #eaf3ef;
+      color: var(--pine);
+    }
+
+    .contact-form {
+      display: grid;
+      gap: 12px;
+    }
+
+    .contact-form label {
+      display: grid;
+      gap: 6px;
+      color: #405266;
+      font-size: 0.92rem;
+      font-weight: 700;
+    }
+
+    .contact-form input,
+    .contact-form textarea {
+      width: 100%;
+      border: 1px solid rgba(9, 33, 61, 0.16);
+      border-radius: 8px;
+      padding: 12px 13px;
+      color: var(--ink);
+      font: inherit;
+      background: #ffffff;
+    }
+
+    .contact-form textarea {
+      min-height: 108px;
+      resize: vertical;
+    }
+
+    .contact-form input:focus,
+    .contact-form textarea:focus {
+      outline: 3px solid rgba(14, 143, 140, 0.18);
+      border-color: var(--teal);
+    }
+
+    .form-status {
+      min-height: 22px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+      line-height: 1.35;
+    }
+
+    .form-status.success {
+      color: var(--pine);
+    }
+
+    .form-status.error {
+      color: #b42318;
+    }
+
     .join-section {
       padding: 56px clamp(18px, 4vw, 48px) 64px;
       background: #eef6f3;
@@ -501,6 +671,18 @@
       .module-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+
+      .timeline-inner {
+        grid-template-columns: 1fr;
+      }
+
+      .timeline-copy {
+        max-width: 720px;
+      }
+
+      .contact-inner {
+        grid-template-columns: 1fr;
+      }
     }
 
     @media (max-width: 680px) {
@@ -564,6 +746,10 @@
         grid-template-columns: 1fr;
       }
 
+      .contact-actions {
+        grid-template-columns: 1fr;
+      }
+
       .visual {
         min-height: 330px;
       }
@@ -601,7 +787,7 @@
           </div>
 
           <div class="nav-item">
-            <a class="nav-link" href="#company">
+            <a class="nav-link" href="#contact">
               Company
               <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
                 <path d="m6 9 6 6 6-6" />
@@ -615,7 +801,7 @@
             </div>
           </div>
 
-          <a class="demo-link" href="demo.html">Get a Demo</a>
+          <a class="demo-link" href="#request-demo">Request a Demo</a>
         </div>
       </nav>
     </header>
@@ -657,11 +843,168 @@
           </div>
         </div>
       </section>
+
+      <section class="timeline-section" aria-label="Mood and stress timeline">
+        <div class="timeline-inner">
+          <div class="timeline-image">
+            <img src="moodAndStress2.png" alt="Mood and stress timeline with possible association analysis" />
+          </div>
+          <div class="timeline-copy">
+            <p>
+              Visualizes mood and stress patterns from journal entries to support self-awareness.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section class="contact-section" id="contact">
+        <div class="contact-inner">
+          <div class="contact-copy">
+            <p class="eyebrow">Contact</p>
+            <h2>Talk with NorCal AI Solutions LLC</h2>
+            <p>
+              Reach out with questions about the Women's Health Journal Companion or request a product demo.
+            </p>
+          </div>
+
+          <div class="contact-actions">
+            <article class="contact-card">
+              <h3>Contact Us</h3>
+              <form class="contact-form" data-contact-form data-type="contact">
+                <label>
+                  Name
+                  <input name="name" autocomplete="name" required />
+                </label>
+                <label>
+                  Company Email
+                  <input name="email" type="email" autocomplete="email" required />
+                </label>
+                <label>
+                  Organization
+                  <input name="organization" autocomplete="organization" />
+                </label>
+                <label>
+                  Message
+                  <textarea name="message" required>I'd like to learn more about NorCal AI Solutions.</textarea>
+                </label>
+                <button class="contact-button secondary" type="submit">Send Message</button>
+                <p class="form-status" role="status" aria-live="polite"></p>
+              </form>
+            </article>
+
+            <article class="contact-card" id="request-demo">
+              <h3>Request a Demo</h3>
+              <form class="contact-form" data-contact-form data-type="demo">
+                <label>
+                  Name
+                  <input name="name" autocomplete="name" required />
+                </label>
+                <label>
+                  Company Email
+                  <input name="email" type="email" autocomplete="email" required />
+                </label>
+                <label>
+                  Organization
+                  <input name="organization" autocomplete="organization" />
+                </label>
+                <label>
+                  Message
+                  <textarea name="message" required>I'd like to request a demo of the Women's Health Journal Companion.</textarea>
+                </label>
+                <button class="contact-button" type="submit">Request Demo</button>
+                <p class="form-status" role="status" aria-live="polite"></p>
+              </form>
+            </article>
+          </div>
+        </div>
+      </section>
     </main>
     <footer class="site-footer">
       <p>&copy; 2026 NorCal AI Solutions LLC. All rights reserved.</p>
     </footer>
   </div>
+  <script>
+    (() => {
+      const personalEmailDomains = new Set([
+        "aol.com",
+        "gmail.com",
+        "googlemail.com",
+        "hotmail.com",
+        "icloud.com",
+        "live.com",
+        "me.com",
+        "msn.com",
+        "outlook.com",
+        "proton.me",
+        "protonmail.com",
+        "yahoo.com",
+        "ymail.com"
+      ]);
+      const apiBase = window.WHJC_API_BASE || document.body.dataset.apiBase || (window.location.protocol === "file:" ? "http://localhost:4000" : "");
+      const endpoint = `${apiBase.replace(/\/$/, "")}/contact`;
+      const allowPersonalEmailTesting =
+        window.WHJC_ALLOW_PERSONAL_EMAIL_TESTING === true ||
+        ["file:", "http:"].includes(window.location.protocol) ||
+        ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+      const isCompanyEmail = (email) => {
+        if (allowPersonalEmailTesting) return true;
+        const domain = email.split("@")[1]?.toLowerCase();
+        return Boolean(domain && !personalEmailDomains.has(domain));
+      };
+
+      document.querySelectorAll("[data-contact-form]").forEach((form) => {
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+
+          const submit = form.querySelector("button[type='submit']");
+          const status = form.querySelector(".form-status");
+          const data = new FormData(form);
+          const payload = {
+            type: form.dataset.type,
+            name: String(data.get("name") || "").trim(),
+            email: String(data.get("email") || "").trim(),
+            organization: String(data.get("organization") || "").trim() || undefined,
+            message: String(data.get("message") || "").trim()
+          };
+
+          status.className = "form-status";
+          if (!isCompanyEmail(payload.email)) {
+            status.className = "form-status error";
+            status.textContent = "Please enter a company email address.";
+            return;
+          }
+
+          status.textContent = "Sending...";
+          submit.disabled = true;
+
+          try {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({}));
+              throw new Error(error.message || "Message could not be sent.");
+            }
+
+            form.reset();
+            status.className = "form-status success";
+            status.textContent = "Thanks, your message was sent.";
+          } catch (error) {
+            status.className = "form-status error";
+            status.textContent = error instanceof TypeError
+              ? "Could not reach the email server. For local testing, run npm run dev -w @whjc/api and make sure WHJC_API_BASE points to that API."
+              : error.message || "Message could not be sent.";
+          } finally {
+            submit.disabled = false;
+          }
+        });
+      });
+    })();
+  </script>
 </body>
 </html>
 
