@@ -1,7 +1,7 @@
 :root {
   color-scheme: light;
   --ink: #0f0d0b;
-  --muted: #4f463d;
+  --muted: #2f2923;
   --line: #c9baa4;
   --panel: #fbf7f2;
   --wash: #f4efe7;
@@ -459,7 +459,7 @@ input[type="range"] {
 
 .policy-panel p {
   margin: 0;
-  color: var(--muted);
+  color: var(--ink);
   line-height: 1.55;
 }
 
@@ -485,7 +485,7 @@ input[type="range"] {
 }
 
 .policy-grid span {
-  color: var(--muted);
+  color: var(--ink);
   line-height: 1.45;
   font-size: 0.88rem;
 }
