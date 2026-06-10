@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { PDFParse } from "pdf-parse";
 import { CryptoService } from "../../common/crypto.service";
 import { DatabaseService } from "../../common/database.service";
 
@@ -84,6 +83,13 @@ async function extractText(file: Express.Multer.File, sourceType: "txt" | "csv" 
   }
 
   if (sourceType === "pdf") {
+    let PDFParse: typeof import("pdf-parse").PDFParse;
+    try {
+      ({ PDFParse } = await import("pdf-parse"));
+    } catch {
+      throw new BadRequestException("PDF import is unavailable in this deployment. Try exporting the cycle summary as TXT or CSV.");
+    }
+
     const parser = new PDFParse({ data: file.buffer });
     try {
       const parsed = await parser.getText();
@@ -92,6 +98,11 @@ async function extractText(file: Express.Multer.File, sourceType: "txt" | "csv" 
         throw new BadRequestException("Could not read text from this PDF. Try exporting the cycle summary as TXT or CSV.");
       }
       return text;
+    } catch (error) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException("Could not read text from this PDF. Try exporting the cycle summary as TXT or CSV.");
     } finally {
       await parser.destroy();
     }
