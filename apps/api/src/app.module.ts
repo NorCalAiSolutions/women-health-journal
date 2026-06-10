@@ -10,6 +10,7 @@ import { ExportModule } from "./modules/export/export.module";
 import { CommonModule } from "./common/common.module";
 import { CycleModule } from "./modules/cycle/cycle.module";
 import { ContactModule } from "./modules/contact/contact.module";
+import { AppController } from "./app.controller";
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ContactModule } from "./modules/contact/contact.module";
     ContactModule,
     ExportModule
   ],
+  controllers: [AppController],
   providers: []
 })
 export class AppModule {}
