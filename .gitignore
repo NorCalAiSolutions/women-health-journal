@@ -15,3 +15,4 @@ dev-server.log
 dev-server.err.log
 .prompt-docx
 .privacy-docx
+user_document/
