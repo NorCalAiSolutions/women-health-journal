@@ -21,6 +21,19 @@ cp .env.example .env
 npm run dev
 ```
 
+## Vercel Deployment
+
+Deploy the frontend and API as separate Vercel projects from this monorepo:
+
+- Frontend project root: `apps/web`
+- Frontend build command: `npm run build`
+- Frontend output directory: `.next`
+- Frontend environment variable: `NEXT_PUBLIC_API_URL=<your deployed API URL>`
+- API project root: `apps/api`
+- API environment variable: `WEB_ORIGIN=<your deployed frontend URL>`
+
+`NEXT_PUBLIC_API_URL` must point to the backend API deployment, not the frontend site. For example, if the frontend is `https://women-health-journal.vercel.app`, the API should be a separate URL such as `https://women-health-journal-api.vercel.app`.
+
 For local Postgres:
 
 ```bash

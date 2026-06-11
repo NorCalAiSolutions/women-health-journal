@@ -14,7 +14,7 @@ import {
   YAxis
 } from "recharts";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000").replace(/\/$/, "");
 const cycleSampleCsv = [
   ["Cycle Duration", "Flow", "Symptoms", "Notes"],
   ["May 1, 2026 - May 29, 2026", "Medium", "cramps; fatigue", "Optional notes without name, DOB, phone, email, or address"],
@@ -291,7 +291,7 @@ export default function Home() {
       setStress(6);
       setJournalMessage("Entry saved. AI extraction updated below.");
     } catch {
-      setJournalMessage(`Could not reach the API at ${API_URL}. Keep the API server running on port 4000.`);
+      setJournalMessage(apiReachabilityMessage());
     } finally {
       setIsSubmitting(false);
     }
@@ -426,7 +426,7 @@ export default function Home() {
         return;
       }
     } catch {
-      setAuthMessage(`Could not reach the API at ${API_URL}. Make sure npm run dev is running and the API has started on port 4000.`);
+      setAuthMessage(apiReachabilityMessage());
       return;
     }
     if (authMode === "register") {
@@ -1309,6 +1309,16 @@ function formatApiError(data: Record<string, unknown>, fallback: string) {
   if (Array.isArray(message)) return `${message.join(" ")}${requestId}`;
   if (typeof message === "string") return `${message}${requestId}`;
   return `${fallback}${requestId}`;
+}
+
+function apiReachabilityMessage() {
+  if (typeof window !== "undefined" && API_URL === window.location.origin) {
+    return `Could not reach the API at ${API_URL}. This is the frontend URL; set NEXT_PUBLIC_API_URL to the deployed backend API URL.`;
+  }
+  if (API_URL.includes("localhost") || API_URL.includes("127.0.0.1")) {
+    return `Could not reach the API at ${API_URL}. Make sure npm run dev is running and the API has started on port 4000.`;
+  }
+  return `Could not reach the API at ${API_URL}. Check that the deployed backend API is running and allows this frontend origin.`;
 }
 
 function isAuthExpired(data: Record<string, unknown>) {
