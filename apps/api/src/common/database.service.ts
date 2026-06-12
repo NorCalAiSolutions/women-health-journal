@@ -7,8 +7,7 @@ export class DatabaseService implements OnModuleDestroy {
   readonly schema = process.env.DATABASE_SCHEMA ?? "whjournal";
 
   private readonly pool = new Pool({
-    connectionString: this.getConnectionString(),
-    ssl: { rejectUnauthorized: false }
+    connectionString: this.getConnectionString()
   });
 
   constructor() {
@@ -16,7 +15,6 @@ export class DatabaseService implements OnModuleDestroy {
       throw new Error("DATABASE_SCHEMA must be a valid PostgreSQL identifier");
     }
   }
-
   private getConnectionString() {
     const connectionString = process.env.norcalaidb_DATABASE_URL ?? process.env.DATABASE_URL;
 
@@ -24,7 +22,13 @@ export class DatabaseService implements OnModuleDestroy {
       throw new Error("DATABASE_URL is required");
     }
 
-    return connectionString;
+    try {
+      const url = new URL(connectionString);
+      url.searchParams.set("sslmode", "verify-full");
+      return url.toString();
+    } catch {
+      return connectionString;
+    }
   }
 
   async query<T extends QueryResultRow = QueryResultRow>(text: string, params: unknown[] = []) {
