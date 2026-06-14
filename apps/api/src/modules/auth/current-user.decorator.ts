@@ -3,6 +3,8 @@ import { createParamDecorator, ExecutionContext } from "@nestjs/common";
 export type AuthUser = {
   sub: string;
   userId: string;
+  roles?: string[];
+  mustChangePassword?: boolean;
 };
 
 export const CurrentUser = createParamDecorator((field: keyof AuthUser | undefined, ctx: ExecutionContext) => {

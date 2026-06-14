@@ -89,9 +89,22 @@ type JournalSubmitResult = {
 type AuthUser = {
   id?: string;
   userId?: string;
+  email?: string;
   displayName?: string;
+  roles?: string[];
+  mustChangePassword?: boolean;
   healthContext?: HealthContext;
   policyConsent?: PolicyConsentStatus;
+};
+
+type AdminUser = {
+  id: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  roles: string[];
+  mustChangePassword: boolean;
+  active: boolean;
 };
 
 type HealthContext = {
@@ -173,13 +186,15 @@ type InsightSummary = {
 };
 
 export default function Home() {
-  const [authMode, setAuthMode] = useState<"login" | "register" | "verify" | "forgot" | "reset">("login");
   const [authUserId, setAuthUserId] = useState("");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authCode, setAuthCode] = useState("");
   const [authPassword, setAuthPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [healthContext, setHealthContext] = useState<HealthContext>({});
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [isRegisterRequestOpen, setIsRegisterRequestOpen] = useState(false);
+  const [registerName, setRegisterName] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerAgeRange, setRegisterAgeRange] = useState("");
+  const [registerMessage, setRegisterMessage] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [signedInUser, setSignedInUser] = useState<AuthUser | null>(null);
@@ -218,7 +233,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (token) {
+    if (token && !signedInUser?.mustChangePassword) {
       void loadTimeline(token, trendRange);
       void loadCycleSummary(token);
     } else {
@@ -228,7 +243,7 @@ export default function Home() {
       setCycleMessage("");
       setSelectedEntry(null);
     }
-  }, [token, trendRange]);
+  }, [token, trendRange, signedInUser?.mustChangePassword]);
 
   const chartData = useMemo(() => {
     if (!timeline.length) return token ? [] : starterTimeline;
@@ -236,7 +251,7 @@ export default function Home() {
   }, [timeline, token]);
 
   const insightSummary = useMemo(() => buildInsightSummary(timeline), [timeline]);
-  const needsPolicyConsent = Boolean(token && policyConsent?.required);
+  const needsPolicyConsent = Boolean(token && !signedInUser?.mustChangePassword && policyConsent?.required);
 
   async function submitJournal() {
     if (!token) {
@@ -395,29 +410,14 @@ export default function Home() {
 
   async function submitAuth() {
     setAuthMessage("");
-    const endpoint =
-      authMode === "login"
-        ? "login"
-        : authMode === "register"
-          ? "register"
-          : authMode === "verify"
-            ? "verify-email"
-            : authMode === "forgot"
-              ? "request-password-reset"
-              : "reset-password";
     let data: Record<string, unknown>;
     try {
-      const response = await fetch(`${API_URL}/auth/${endpoint}`, {
+      const response = await fetch(`${API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: authUserId,
-          email: authEmail,
-          code: authCode,
-          password: authMode === "login" || authMode === "register" ? authPassword : undefined,
-          newPassword: authMode === "reset" ? authPassword : undefined,
-          displayName: displayName || undefined,
-          ...(authMode === "register" ? cleanHealthContext(healthContext) : {})
+          password: authPassword
         })
       });
       data = await response.json().catch(() => ({}));
@@ -429,20 +429,6 @@ export default function Home() {
       setAuthMessage(apiReachabilityMessage());
       return;
     }
-    if (authMode === "register") {
-      setAuthMode("verify");
-      setAuthMessage(
-        data.devVerificationCode
-          ? `Verification code: ${data.devVerificationCode}`
-          : "Check your email for the verification code."
-      );
-      return;
-    }
-    if (authMode === "forgot") {
-      setAuthMode("reset");
-      setAuthMessage(data.devResetCode ? `Reset code: ${data.devResetCode}` : "If that user ID and email are registered, check your email for the reset code.");
-      return;
-    }
     const accessToken = String(data.accessToken ?? "");
     localStorage.setItem("whjc_access_token", accessToken);
     setCycleSummary(null);
@@ -450,11 +436,65 @@ export default function Home() {
     setToken(accessToken);
     setSignedInUser((data.user as AuthUser | undefined) ?? null);
     await loadCurrentUser(accessToken);
-    setAuthMessage(
-      authMode === "reset"
-        ? "Password reset. You are signed in."
-        : `Signed in as ${authUserId}.`
-    );
+    setAuthMessage(`Signed in as ${authUserId}.`);
+  }
+
+  async function submitPasswordChange() {
+    if (!token) return;
+    setAuthMessage("");
+    try {
+      const response = await fetch(`${API_URL}/auth/change-password`, {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify({
+          currentPassword,
+          newPassword
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setAuthMessage(formatApiError(data, "Password change failed."));
+        return;
+      }
+      const accessToken = String(data.accessToken ?? "");
+      localStorage.setItem("whjc_access_token", accessToken);
+      setToken(accessToken);
+      setSignedInUser((data.user as AuthUser | undefined) ?? null);
+      setCurrentPassword("");
+      setNewPassword("");
+      await loadCurrentUser(accessToken);
+      setAuthMessage("Password updated.");
+    } catch {
+      setAuthMessage(apiReachabilityMessage());
+    }
+  }
+
+  async function submitRegisterRequest() {
+    setRegisterMessage("Sending registration request...");
+    try {
+      const response = await fetch(`${API_URL}/contact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "register",
+          name: registerName,
+          email: registerEmail,
+          message: `New user registration request.\n\nName: ${registerName}\nEmail: ${registerEmail}\nAge range: ${registerAgeRange || "Not provided"}`
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setRegisterMessage(formatApiError(data, "Could not send registration request."));
+        return;
+      }
+      setRegisterName("");
+      setRegisterEmail("");
+      setRegisterAgeRange("");
+      setRegisterMessage("Registration request sent. An admin will follow up.");
+      setIsRegisterRequestOpen(false);
+    } catch {
+      setRegisterMessage(apiReachabilityMessage());
+    }
   }
 
   async function downloadExport() {
@@ -526,15 +566,12 @@ export default function Home() {
       dataRightsAccepted: false
     });
     setAuthUserId("");
-    setAuthEmail("");
-    setAuthCode("");
     setAuthPassword("");
-    setDisplayName("");
-    setHealthContext({});
+    setCurrentPassword("");
+    setNewPassword("");
     setCycleSummary(null);
     setCycleMessage("");
     setShowPassword(false);
-    setAuthMode("login");
     setAuthMessage("Signed out.");
   }
 
@@ -542,25 +579,11 @@ export default function Home() {
     localStorage.removeItem("whjc_access_token");
     setToken(null);
     setAuthPassword("");
+    setCurrentPassword("");
+    setNewPassword("");
     setCycleSummary(null);
     setCycleMessage("");
     setShowPassword(false);
-    setAuthMode("login");
-  }
-
-  function switchAuthMode(mode: "login" | "register" | "verify" | "forgot" | "reset") {
-    setAuthMode(mode);
-    setAuthMessage("");
-    if (mode === "register" || mode === "login") {
-      setCycleMessage("");
-    }
-  }
-
-  function updateHealthContext(key: keyof HealthContext, value: string) {
-    setHealthContext((current) => ({
-      ...current,
-      [key]: value || undefined
-    }));
   }
 
   return (
@@ -620,10 +643,10 @@ export default function Home() {
                     <dd>Downloads an informational doctor report for the selected trend range.</dd>
                     <dt>Log In</dt>
                     <dd>Signs in with your private app user ID and password.</dd>
-                    <dt>Register / Create Account</dt>
-                    <dd>Creates a new private app account and sends an email verification code.</dd>
-                    <dt>Forgot my password</dt>
-                    <dd>Sends a reset code when the user ID and email match an account.</dd>
+                    <dt>Update Password</dt>
+                    <dd>Lets users replace an admin-provided temporary password after signing in.</dd>
+                    <dt>Create User</dt>
+                    <dd>Lets admins create users with a temporary password and optional health context.</dd>
                     <dt>Export Account Data</dt>
                     <dd>Downloads your account, consent, journal, AI extraction, safety, and cycle import data as JSON.</dd>
                     <dt>Import Apple Health Cycle</dt>
@@ -644,7 +667,9 @@ export default function Home() {
                   <h3>Sections</h3>
                   <dl>
                     <dt>Private App Sign-In</dt>
-                    <dd>Handles login, registration, verification, password reset, account export, cycle import, and account deletion.</dd>
+                    <dd>Handles login, required password changes, account export, cycle import, and account deletion.</dd>
+                    <dt>Admin User Management</dt>
+                    <dd>Lets admins create users and reset temporary passwords without sending confirmation codes.</dd>
                     <dt>Privacy, Terms, and AI Use</dt>
                     <dd>Shows required acknowledgements before journaling is enabled for the current policy version.</dd>
                     <dt>Imported Cycle Summary</dt>
@@ -684,165 +709,89 @@ export default function Home() {
           {!token && (
             <div className="auth-grid">
               <label>
-                User ID
-                <input value={authUserId} onChange={(event) => setAuthUserId(event.target.value)} autoComplete="username" />
+                Email
+                <input value={authUserId} onChange={(event) => setAuthUserId(event.target.value)} autoComplete="username" type="email" />
               </label>
-              {(authMode === "register" || authMode === "forgot" || authMode === "reset") && (
-                <label>
-                  Email
-                  <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} autoComplete="email" />
-                </label>
-              )}
-              {authMode === "register" && (
-                <label>
-                  Display name
-                  <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} autoComplete="name" />
-                </label>
-              )}
-              {authMode === "register" && (
-                <>
-                  <label>
-                    Age range
-                    <select value={healthContext.ageRange ?? ""} onChange={(event) => updateHealthContext("ageRange", event.target.value)}>
-                      <option value="">Optional</option>
-                      <option value="13_17">13-17</option>
-                      <option value="18_24">18-24</option>
-                      <option value="25_34">25-34</option>
-                      <option value="35_44">35-44</option>
-                      <option value="45_plus">45+</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option>
-                    </select>
-                  </label>
-                  <label>
-                    Period started age
-                    <select value={healthContext.periodStartedAgeRange ?? ""} onChange={(event) => updateHealthContext("periodStartedAgeRange", event.target.value)}>
-                      <option value="">Optional</option>
-                      <option value="before_10">Before 10</option>
-                      <option value="10_12">10-12</option>
-                      <option value="13_15">13-15</option>
-                      <option value="16_plus">16+</option>
-                      <option value="not_started">Not started</option>
-                      <option value="not_sure">Not sure</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option>
-                    </select>
-                  </label>
-                  <label>
-                    Hormonal context
-                    <select value={healthContext.hormonalMedicationContext ?? ""} onChange={(event) => updateHealthContext("hormonalMedicationContext", event.target.value)}>
-                      <option value="">Optional</option>
-                      <option value="none">None</option>
-                      <option value="contraception">Contraception</option>
-                      <option value="hormonal_medication">Hormonal medication</option>
-                      <option value="both">Both</option>
-                      <option value="unsure">Unsure</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option>
-                    </select>
-                  </label>
-                  <label>
-                    Pregnancy/postpartum
-                    <select value={healthContext.pregnancyPostpartumStatus ?? ""} onChange={(event) => updateHealthContext("pregnancyPostpartumStatus", event.target.value)}>
-                      <option value="">Optional</option>
-                      <option value="not_pregnant_or_postpartum">Not pregnant/postpartum</option>
-                      <option value="pregnant">Pregnant</option>
-                      <option value="postpartum">Postpartum</option>
-                      <option value="trying_to_conceive">Trying to conceive</option>
-                      <option value="unsure">Unsure</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option>
-                    </select>
-                  </label>
-                  <label>
-                    Cycle baseline
-                    <select value={healthContext.cycleBaseline ?? ""} onChange={(event) => updateHealthContext("cycleBaseline", event.target.value)}>
-                      <option value="">Optional</option>
-                      <option value="regular">Regular</option>
-                      <option value="somewhat_irregular">Somewhat irregular</option>
-                      <option value="irregular">Irregular</option>
-                      <option value="no_periods">No periods</option>
-                      <option value="not_sure">Not sure</option>
-                      <option value="prefer_not_to_say">Prefer not to say</option>
-                    </select>
-                  </label>
-                </>
-              )}
-              {(authMode === "verify" || authMode === "reset") && (
-                <label>
-                  Code
-                  <input value={authCode} onChange={(event) => setAuthCode(event.target.value)} inputMode="numeric" />
-                </label>
-              )}
-              {authMode !== "forgot" && authMode !== "verify" && (
-                <label>
-                  {authMode === "reset" ? "New password" : "Password"}
-                  <span className="password-field">
-                    <input
-                      type={showPassword ? "text" : "password"}
-                      value={authPassword}
-                      onChange={(event) => setAuthPassword(event.target.value)}
-                      autoComplete={authMode === "login" ? "current-password" : "new-password"}
-                    />
-                    <button
-                      type="button"
-                      className="field-icon"
-                      onClick={() => setShowPassword((value) => !value)}
-                      title={showPassword ? "Hide password" : "Show password"}
-                    >
-                      {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
-                    </button>
-                  </span>
-                </label>
-              )}
+              <label>
+                Password
+                <span className="password-field">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    className="field-icon"
+                    onClick={() => setShowPassword((value) => !value)}
+                    title={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff aria-hidden /> : <Eye aria-hidden />}
+                  </button>
+                </span>
+              </label>
+            </div>
+          )}
+          {token && signedInUser?.mustChangePassword && (
+            <div className="auth-grid">
+              <label>
+                Temporary/current password
+                <input type="password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} autoComplete="current-password" />
+              </label>
+              <label>
+                New password
+                <input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={12} autoComplete="new-password" />
+              </label>
             </div>
           )}
           <div className="auth-actions">
             {!token && (
               <>
                 <button onClick={submitAuth}>
-                  {authMode === "login" ? <Lock aria-hidden /> : authMode === "register" ? <UserPlus aria-hidden /> : <KeyRound aria-hidden />}
-                  {authMode === "login"
-                    ? "Log In"
-                    : authMode === "register"
-                      ? "Create Account"
-                      : authMode === "verify"
-                        ? "Verify Email"
-                        : authMode === "forgot"
-                          ? "Email Reset Code"
-                          : "Reset Password"}
+                  <Lock aria-hidden />
+                  Log In
                 </button>
-                <button className="secondary" onClick={() => switchAuthMode(authMode === "login" ? "register" : "login")}>
-                  {authMode === "login" ? "Register" : "Use Login"}
+                <button className="link-button" onClick={() => setIsRegisterRequestOpen((value) => !value)}>
+                  Register
                 </button>
-                {authMode === "login" && (
-                  <button className="link-button" onClick={() => switchAuthMode("forgot")}>
-                    Forgot my password
-                  </button>
-                )}
               </>
+            )}
+            {token && signedInUser?.mustChangePassword && (
+              <button onClick={submitPasswordChange}>
+                <KeyRound aria-hidden />
+                Update Password
+              </button>
             )}
             {token && (
               <>
                 <span className="signed-in-user">
                   Signed in as <b>{signedInUser?.displayName ?? signedInUser?.userId ?? "user"}</b>
                 </span>
-                <button className="secondary" onClick={downloadAccountData}>
-                  <Download aria-hidden />
-                  Export Account Data
-                </button>
-                <label className="file-button">
-                  <Upload aria-hidden />
-                  Import Apple Health Cycle
-                  <input
-                    type="file"
-                    accept=".txt,.csv,.pdf,text/plain,text/csv,application/pdf"
-                    onChange={(event) => {
-                      void uploadCycleSummary(event.target.files?.[0]);
-                      event.target.value = "";
-                    }}
-                  />
-                </label>
-                <button className="danger" onClick={deleteAccount}>
-                  <Trash2 aria-hidden />
-                  Delete Account
-                </button>
+                {!signedInUser?.mustChangePassword && (
+                  <>
+                    <button className="secondary" onClick={downloadAccountData}>
+                      <Download aria-hidden />
+                      Export Account Data
+                    </button>
+                    <label className="file-button">
+                      <Upload aria-hidden />
+                      Import Apple Health Cycle
+                      <input
+                        type="file"
+                        accept=".txt,.csv,.pdf,text/plain,text/csv,application/pdf"
+                        onChange={(event) => {
+                          void uploadCycleSummary(event.target.files?.[0]);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                    <button className="danger" onClick={deleteAccount}>
+                      <Trash2 aria-hidden />
+                      Delete Account
+                    </button>
+                  </>
+                )}
                 <button className="secondary" onClick={logout}>
                   <LogOut aria-hidden />
                   Log Out
@@ -851,7 +800,40 @@ export default function Home() {
             )}
             <span>{authMessage}</span>
           </div>
+          {!token && isRegisterRequestOpen && (
+            <div className="register-request">
+              <label>
+                Name
+                <input value={registerName} onChange={(event) => setRegisterName(event.target.value)} autoComplete="name" />
+              </label>
+              <label>
+                Email
+                <input type="email" value={registerEmail} onChange={(event) => setRegisterEmail(event.target.value)} autoComplete="email" />
+              </label>
+              <label>
+                Age range
+                <select value={registerAgeRange} onChange={(event) => setRegisterAgeRange(event.target.value)}>
+                  <option value="">Optional</option>
+                  <option value="13_17">13-17</option>
+                  <option value="18_24">18-24</option>
+                  <option value="25_34">25-34</option>
+                  <option value="35_44">35-44</option>
+                  <option value="45_plus">45+</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
+                </select>
+              </label>
+              <button onClick={submitRegisterRequest} disabled={!registerName.trim() || !registerEmail.trim()}>
+                <Send aria-hidden />
+                Submit
+              </button>
+              <span>{registerMessage}</span>
+            </div>
+          )}
         </section>
+
+        {token && signedInUser?.roles?.includes("admin") && !signedInUser.mustChangePassword && (
+          <AdminUsersPanel token={token} />
+        )}
 
         {needsPolicyConsent && (
           <section className="panel policy-panel">
@@ -1282,6 +1264,207 @@ export default function Home() {
         </section>
       </section>
     </main>
+  );
+}
+
+function AdminUsersPanel({ token }: { token: string }) {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [status, setStatus] = useState("Ready to manage users.");
+  const [email, setEmail] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [role, setRole] = useState<"user" | "admin">("user");
+  const [healthContext, setHealthContext] = useState<HealthContext>({});
+  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
+
+  const headers = useMemo(() => authHeaders(token), [token]);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [headers]);
+
+  async function loadUsers() {
+    const response = await fetch(`${API_URL}/auth/admin/users`, { headers });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setStatus(formatApiError(data, "Unable to load users."));
+      return;
+    }
+    setUsers(data as AdminUser[]);
+  }
+
+  async function createUser() {
+    setStatus("Creating user...");
+    const response = await fetch(`${API_URL}/auth/admin/users`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        email,
+        displayName: displayName || undefined,
+        password: temporaryPassword,
+        role,
+        ...cleanHealthContext(healthContext)
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setStatus(formatApiError(data, "Unable to create user."));
+      return;
+    }
+    setEmail("");
+    setDisplayName("");
+    setTemporaryPassword("");
+    setRole("user");
+    setHealthContext({});
+    setStatus(`Created ${String((data as AdminUser).userId ?? email)}.`);
+    await loadUsers();
+  }
+
+  async function resetPassword(user: AdminUser) {
+    const temporary = resetPasswords[user.id] ?? "";
+    if (!temporary) {
+      setStatus(`Enter a temporary password for ${user.userId}.`);
+      return;
+    }
+    const response = await fetch(`${API_URL}/auth/admin/users/${user.id}/reset-password`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ temporaryPassword: temporary })
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setStatus(formatApiError(data, "Unable to reset password."));
+      return;
+    }
+    setResetPasswords((current) => ({ ...current, [user.id]: "" }));
+    setStatus(`Temporary password reset for ${user.userId}.`);
+    await loadUsers();
+  }
+
+  function updateHealthContext(key: keyof HealthContext, value: string) {
+    setHealthContext((current) => ({
+      ...current,
+      [key]: value || undefined
+    }));
+  }
+
+  return (
+    <section className="panel admin-panel">
+      <div className="panel-title">
+        <UserPlus aria-hidden />
+        <h2>Admin User Management</h2>
+      </div>
+      <div className="admin-create-form">
+        <label>
+          Email / user ID
+          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+        </label>
+        <label>
+          Display name
+          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        </label>
+        <label>
+          Temporary password
+          <input type="password" minLength={12} value={temporaryPassword} onChange={(event) => setTemporaryPassword(event.target.value)} />
+        </label>
+        <label>
+          Role
+          <select value={role} onChange={(event) => setRole(event.target.value as "user" | "admin")}>
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </label>
+        <label>
+          Age range
+          <select value={healthContext.ageRange ?? ""} onChange={(event) => updateHealthContext("ageRange", event.target.value)}>
+            <option value="">Optional</option>
+            <option value="13_17">13-17</option>
+            <option value="18_24">18-24</option>
+            <option value="25_34">25-34</option>
+            <option value="35_44">35-44</option>
+            <option value="45_plus">45+</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+        <label>
+          Period started age
+          <select value={healthContext.periodStartedAgeRange ?? ""} onChange={(event) => updateHealthContext("periodStartedAgeRange", event.target.value)}>
+            <option value="">Optional</option>
+            <option value="before_10">Before 10</option>
+            <option value="10_12">10-12</option>
+            <option value="13_15">13-15</option>
+            <option value="16_plus">16+</option>
+            <option value="not_started">Not started</option>
+            <option value="not_sure">Not sure</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+        <label>
+          Hormonal context
+          <select value={healthContext.hormonalMedicationContext ?? ""} onChange={(event) => updateHealthContext("hormonalMedicationContext", event.target.value)}>
+            <option value="">Optional</option>
+            <option value="none">None</option>
+            <option value="contraception">Contraception</option>
+            <option value="hormonal_medication">Hormonal medication</option>
+            <option value="both">Both</option>
+            <option value="unsure">Unsure</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+        <label>
+          Pregnancy/postpartum
+          <select value={healthContext.pregnancyPostpartumStatus ?? ""} onChange={(event) => updateHealthContext("pregnancyPostpartumStatus", event.target.value)}>
+            <option value="">Optional</option>
+            <option value="not_pregnant_or_postpartum">Not pregnant/postpartum</option>
+            <option value="pregnant">Pregnant</option>
+            <option value="postpartum">Postpartum</option>
+            <option value="trying_to_conceive">Trying to conceive</option>
+            <option value="unsure">Unsure</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+        <label>
+          Cycle baseline
+          <select value={healthContext.cycleBaseline ?? ""} onChange={(event) => updateHealthContext("cycleBaseline", event.target.value)}>
+            <option value="">Optional</option>
+            <option value="regular">Regular</option>
+            <option value="somewhat_irregular">Somewhat irregular</option>
+            <option value="irregular">Irregular</option>
+            <option value="no_periods">No periods</option>
+            <option value="not_sure">Not sure</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </select>
+        </label>
+        <button onClick={createUser}>
+          <UserPlus aria-hidden />
+          Create User
+        </button>
+      </div>
+      <p className="form-message">{status}</p>
+      <div className="admin-user-list">
+        {users.map((user) => (
+          <article className="admin-user-row" key={user.id}>
+            <div>
+              <strong>{user.displayName ?? user.userId}</strong>
+              <span>{user.userId} - {user.email}</span>
+            </div>
+            <span>{user.roles.join(", ")}</span>
+            <span className={user.mustChangePassword ? "status-pill warn" : "status-pill good"}>
+              {user.mustChangePassword ? "Password change required" : "Active password"}
+            </span>
+            <div className="reset-form">
+              <input
+                type="password"
+                placeholder="Temporary password"
+                value={resetPasswords[user.id] ?? ""}
+                onChange={(event) => setResetPasswords((current) => ({ ...current, [user.id]: event.target.value }))}
+              />
+              <button type="button" onClick={() => resetPassword(user)}>Reset</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 

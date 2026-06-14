@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS whjournal.users (
   email_verified_at timestamptz,
   password_hash text NOT NULL,
   display_name text,
+  roles text[] NOT NULL DEFAULT ARRAY['user']::text[],
+  must_change_password boolean NOT NULL DEFAULT false,
+  failed_login_attempts integer NOT NULL DEFAULT 0,
+  locked_until timestamptz,
   age_range text CHECK (age_range IS NULL OR age_range IN ('13_17', '18_24', '25_34', '35_44', '45_plus', 'prefer_not_to_say')),
   period_started_age_range text CHECK (period_started_age_range IS NULL OR period_started_age_range IN ('before_10', '10_12', '13_15', '16_plus', 'not_started', 'not_sure', 'prefer_not_to_say')),
   hormonal_medication_context text CHECK (hormonal_medication_context IS NULL OR hormonal_medication_context IN ('none', 'contraception', 'hormonal_medication', 'both', 'unsure', 'prefer_not_to_say')),
@@ -28,6 +32,18 @@ ALTER TABLE whjournal.users
 
 ALTER TABLE whjournal.users
   ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+
+ALTER TABLE whjournal.users
+  ADD COLUMN IF NOT EXISTS roles text[] NOT NULL DEFAULT ARRAY['user']::text[];
+
+ALTER TABLE whjournal.users
+  ADD COLUMN IF NOT EXISTS must_change_password boolean NOT NULL DEFAULT false;
+
+ALTER TABLE whjournal.users
+  ADD COLUMN IF NOT EXISTS failed_login_attempts integer NOT NULL DEFAULT 0;
+
+ALTER TABLE whjournal.users
+  ADD COLUMN IF NOT EXISTS locked_until timestamptz;
 
 CREATE UNIQUE INDEX IF NOT EXISTS users_login_id_unique_idx
   ON whjournal.users(login_id)

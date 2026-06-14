@@ -181,6 +181,84 @@ h2 {
   color: var(--teal);
 }
 
+.register-request {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto minmax(180px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
+
+.register-request span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.admin-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-create-form {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.admin-user-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-user-row {
+  border: 1px solid var(--line);
+  background: #fffaf4;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.2fr) minmax(100px, 0.6fr) minmax(160px, 0.7fr) minmax(220px, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-user-row strong,
+.admin-user-row span {
+  display: block;
+}
+
+.admin-user-row span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.status-pill {
+  border: 1px solid var(--line);
+  padding: 7px 9px;
+  text-align: center;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.status-pill.good {
+  border-color: #4d7c0f;
+  color: #4d7c0f;
+}
+
+.status-pill.warn {
+  border-color: var(--rose);
+  color: var(--rose);
+}
+
+.reset-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
 .password-field {
   position: relative;
   display: block;
@@ -1033,13 +1111,16 @@ pre {
   .charts,
   .correlation-grid,
   .help-content,
+  .admin-create-form,
+  .admin-user-row,
   .entry-summary,
   .summary-metrics,
   .cycle-import-options,
   .cycle-summary-grid,
   .fields,
   .policy-grid,
-  .auth-grid {
+  .auth-grid,
+  .register-request {
     grid-template-columns: 1fr;
   }
 
@@ -1054,5 +1135,9 @@ pre {
 
   .cycle-detail {
     grid-column: span 1;
+  }
+
+  .reset-form {
+    grid-template-columns: 1fr;
   }
 }

@@ -35,14 +35,14 @@ export class EmailService {
   }
 
   async sendContactRequest(message: {
-    type: "contact" | "demo";
+    type: "contact" | "demo" | "register";
     name: string;
     email: string;
     organization?: string;
     message: string;
   }) {
-    const label = message.type === "demo" ? "Demo Request" : "Contact Request";
-    const to = this.config.get<string>("CONTACT_TO") ?? "akhil100@gmail.com";
+    const label = message.type === "demo" ? "Demo Request" : message.type === "register" ? "Registration Request" : "Contact Request";
+    const to = message.type === "register" ? "womanhealthjournal@gmail.com" : this.config.get<string>("CONTACT_TO") ?? "akhil100@gmail.com";
     return this.send({
       to,
       subject: `${label}: ${message.name}`,

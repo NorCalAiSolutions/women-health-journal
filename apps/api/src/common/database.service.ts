@@ -24,7 +24,10 @@ export class DatabaseService implements OnModuleDestroy {
 
     try {
       const url = new URL(connectionString);
-      url.searchParams.set("sslmode", "verify-full");
+      if (!url.searchParams.has("sslmode")) {
+        const isLocal = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+        url.searchParams.set("sslmode", isLocal ? "disable" : "verify-full");
+      }
       return url.toString();
     } catch {
       return connectionString;

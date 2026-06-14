@@ -1,18 +1,16 @@
-import { ConflictException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { ConflictException, Injectable, OnModuleInit, UnauthorizedException } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import * as argon2 from "argon2";
-import { randomInt } from "node:crypto";
 import { AuditContext, AuditService } from "../../common/audit.service";
 import { CryptoService } from "../../common/crypto.service";
 import { DatabaseService } from "../../common/database.service";
-import { EmailService } from "../../common/email.service";
 import {
   AcceptPolicyConsentsInput,
+  AdminCreateUserInput,
+  AdminResetPasswordInput,
+  ChangePasswordInput,
   LoginInput,
-  RegisterInput,
-  RequestPasswordResetInput,
-  ResetPasswordInput,
-  VerifyEmailInput
+  RegisterInput
 } from "./auth.schemas";
 
 const POLICY_VERSION = "2026-05-22";
@@ -25,6 +23,10 @@ type UserRow = {
   email_verified_at: Date | null;
   password_hash: string;
   display_name: string | null;
+  roles: string[];
+  must_change_password: boolean;
+  failed_login_attempts: number;
+  locked_until: Date | null;
   age_range: string | null;
   period_started_age_range: string | null;
   hormonal_medication_context: string | null;
@@ -32,40 +34,47 @@ type UserRow = {
   cycle_baseline: string | null;
 };
 
-type CodeRow = {
-  id: string;
-  code_hash: string;
-};
+type HealthContextInput = Pick<
+  RegisterInput,
+  "ageRange" | "periodStartedAgeRange" | "hormonalMedicationContext" | "pregnancyPostpartumStatus" | "cycleBaseline"
+>;
 
 @Injectable()
-export class AuthService {
+export class AuthService implements OnModuleInit {
   constructor(
     private readonly db: DatabaseService,
     private readonly jwt: JwtService,
-    private readonly email: EmailService,
     private readonly crypto: CryptoService,
     private readonly audit: AuditService
   ) {}
 
-  async register(input: RegisterInput, context?: AuditContext) {
-    const userId = input.userId.toLowerCase();
+  async onModuleInit() {
+    await this.ensureSeedAdmin();
+  }
+
+  async adminCreateUser(input: AdminCreateUserInput, context?: AuditContext) {
     const email = input.email.toLowerCase();
+    const userId = email;
     if (await this.findByLoginId(userId)) {
-      throw new ConflictException("This user ID is already registered.");
+      throw new ConflictException("This email is already registered as a user ID.");
+    }
+    if (await this.findByEmail(email)) {
+      throw new ConflictException("This email is already assigned to another account.");
     }
 
     const id = this.db.id();
     const passwordHash = await argon2.hash(input.password);
     await this.db.query(
       `INSERT INTO ${this.db.table("users")}
-        (id, login_id, email, password_hash, display_name, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        (id, login_id, email, email_verified_at, password_hash, display_name, roles, must_change_password, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline)
+       VALUES ($1, $2, $3, now(), $4, $5, $6, true, $7, $8, $9, $10, $11)`,
       [
         id,
         userId,
         email,
         passwordHash,
         input.displayName ?? userId,
+        [input.role ?? "user"],
         input.ageRange ?? null,
         input.periodStartedAgeRange ?? null,
         input.hormonalMedicationContext ?? null,
@@ -73,95 +82,95 @@ export class AuthService {
         input.cycleBaseline ?? null
       ]
     );
-    await this.audit.log(id, "ACCOUNT_REGISTERED", { loginId: userId, emailDomain: emailDomain(email), healthContextProvided: hasHealthContext(input) }, context);
+    await this.audit.log(id, "ACCOUNT_CREATED_BY_ADMIN", { loginId: userId, emailDomain: emailDomain(email), role: input.role ?? "user", healthContextProvided: hasHealthContext(input) }, context);
 
-    const verificationCode = await this.createCode("email_verification_codes", id, 24 * 60);
-    const emailSent = await this.email.sendVerificationCode(email, verificationCode);
-    await this.audit.log(id, "EMAIL_VERIFICATION_CODE_SENT", { emailSent }, context);
-    return {
-      requiresEmailVerification: true,
-      emailSent,
-      user: { userId, email, displayName: input.displayName ?? userId, healthContext: healthContextFromInput(input) },
-      devVerificationCode: !emailSent && this.includeDevCodes() ? verificationCode : undefined
-    };
+    return this.safeUser({
+      id,
+      login_id: userId,
+      email,
+      display_name: input.displayName ?? userId,
+      roles: [input.role ?? "user"],
+      must_change_password: true,
+      email_verified_at: new Date(),
+      locked_until: null,
+    });
   }
 
   async login(input: LoginInput, context?: AuditContext) {
     const user = await this.findByLoginId(input.userId.toLowerCase());
+    if (user?.locked_until && user.locked_until > new Date()) {
+      await this.audit.log(user.id, "LOGIN_BLOCKED", { reason: "account_locked" }, context);
+      throw new UnauthorizedException("Account is temporarily locked.");
+    }
     if (!user || !(await argon2.verify(user.password_hash, input.password))) {
+      if (user) {
+        await this.recordFailedLogin(user);
+      }
       await this.audit.log(user?.id ?? null, "LOGIN_FAILED", { attemptedLoginId: input.userId.toLowerCase(), reason: "invalid_credentials" }, context);
       throw new UnauthorizedException("Invalid user ID or password.");
     }
-    if (!user.email_verified_at) {
-      await this.audit.log(user.id, "LOGIN_BLOCKED", { reason: "email_not_verified" }, context);
-      throw new UnauthorizedException("Please verify your email before logging in.");
-    }
 
+    await this.db.query(
+      `UPDATE ${this.db.table("users")}
+       SET failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+       WHERE id = $1`,
+      [user.id]
+    );
     await this.audit.log(user.id, "LOGIN_SUCCEEDED", { loginId: user.login_id }, context);
     return this.issueToken(user);
   }
 
-  async verifyEmail(input: VerifyEmailInput, context?: AuditContext) {
-    const user = await this.findByLoginId(input.userId.toLowerCase());
+  async changePassword(userId: string, input: Omit<ChangePasswordInput, "userId">, context?: AuditContext) {
+    const user = await this.findById(userId);
     if (!user) {
-      throw new UnauthorizedException("Invalid user ID or verification code.");
+      throw new UnauthorizedException("User no longer exists.");
+    }
+    if (!(await argon2.verify(user.password_hash, input.currentPassword))) {
+      await this.audit.log(user.id, "PASSWORD_CHANGE_FAILED", { reason: "invalid_current_password" }, context);
+      throw new UnauthorizedException("Current password is incorrect.");
     }
 
-    await this.consumeCode("email_verification_codes", user.id, input.code);
-    await this.db.query(
-      `UPDATE ${this.db.table("users")}
-       SET email_verified_at = COALESCE(email_verified_at, now()), updated_at = now()
-       WHERE id = $1`,
-      [user.id]
-    );
-    await this.audit.log(user.id, "EMAIL_VERIFIED", { loginId: user.login_id }, context);
-
-    return this.issueToken({ id: user.id, login_id: user.login_id, display_name: user.display_name });
-  }
-
-  async requestPasswordReset(input: RequestPasswordResetInput, context?: AuditContext) {
-    const user = await this.findByLoginId(input.userId.toLowerCase());
-    if (!user) {
-      await this.audit.log(null, "PASSWORD_RESET_REQUESTED", { matchedUser: false, attemptedLoginId: input.userId.toLowerCase(), emailDomain: emailDomain(input.email) }, context);
-      return { message: "If that user ID and email are registered, a reset code has been sent." };
-    }
-    if (user.email.toLowerCase() !== input.email.toLowerCase()) {
-      await this.audit.log(user.id, "PASSWORD_RESET_REQUESTED", { matchedUser: false, reason: "email_mismatch", emailDomain: emailDomain(input.email) }, context);
-      return { message: "If that user ID and email are registered, a reset code has been sent." };
-    }
-
-    const resetCode = await this.createCode("password_reset_codes", user.id, 30);
-    const emailSent = await this.email.sendPasswordResetCode(user.email, resetCode);
-    await this.audit.log(user.id, "PASSWORD_RESET_REQUESTED", { matchedUser: true, emailSent }, context);
-    return {
-      message: "If that user ID and email are registered, a reset code has been sent.",
-      emailSent,
-      devResetCode: !emailSent && this.includeDevCodes() ? resetCode : undefined
-    };
-  }
-
-  async resetPassword(input: ResetPasswordInput, context?: AuditContext) {
-    const user = await this.findByLoginId(input.userId.toLowerCase());
-    if (!user || user.email.toLowerCase() !== input.email.toLowerCase()) {
-      throw new UnauthorizedException("Invalid user ID, email, or reset code.");
-    }
-
-    await this.consumeCode("password_reset_codes", user.id, input.code);
     const passwordHash = await argon2.hash(input.newPassword);
     await this.db.query(
       `UPDATE ${this.db.table("users")}
-       SET password_hash = $1, email_verified_at = COALESCE(email_verified_at, now()), updated_at = now()
+       SET password_hash = $1, must_change_password = false, email_verified_at = COALESCE(email_verified_at, now()), updated_at = now()
        WHERE id = $2`,
       [passwordHash, user.id]
     );
-    await this.audit.log(user.id, "PASSWORD_RESET_COMPLETED", {}, context);
+    await this.audit.log(user.id, "PASSWORD_CHANGED", {}, context);
 
-    return this.issueToken({ id: user.id, login_id: user.login_id, display_name: user.display_name });
+    return this.issueToken({ ...user, must_change_password: false });
+  }
+
+  async adminResetPassword(userId: string, input: AdminResetPasswordInput, context?: AuditContext) {
+    const user = await this.findById(userId);
+    if (!user) {
+      throw new UnauthorizedException("User not found.");
+    }
+    const passwordHash = await argon2.hash(input.temporaryPassword);
+    await this.db.query(
+      `UPDATE ${this.db.table("users")}
+       SET password_hash = $1, must_change_password = true, failed_login_attempts = 0, locked_until = NULL, updated_at = now()
+       WHERE id = $2`,
+      [passwordHash, userId]
+    );
+    await this.audit.log(userId, "PASSWORD_RESET_BY_ADMIN", { loginId: user.login_id }, context);
+    return this.safeUser({ ...user, must_change_password: true, locked_until: null });
+  }
+
+  async listUsers() {
+    const result = await this.db.query<UserRow>(
+      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, roles, must_change_password, failed_login_attempts, locked_until, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
+       FROM ${this.db.table("users")}
+       WHERE deleted_at IS NULL
+       ORDER BY created_at ASC`
+    );
+    return result.rows.map((user) => this.safeUser(user));
   }
 
   async me(userId: string) {
-    const result = await this.db.query<Pick<UserRow, "id" | "login_id" | "display_name" | "email" | "age_range" | "period_started_age_range" | "hormonal_medication_context" | "pregnancy_postpartum_status" | "cycle_baseline">>(
-      `SELECT id, login_id, display_name, email, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
+    const result = await this.db.query<Pick<UserRow, "id" | "login_id" | "display_name" | "email" | "roles" | "must_change_password" | "age_range" | "period_started_age_range" | "hormonal_medication_context" | "pregnancy_postpartum_status" | "cycle_baseline">>(
+      `SELECT id, login_id, display_name, email, roles, must_change_password, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
        FROM ${this.db.table("users")}
        WHERE id = $1`,
       [userId]
@@ -175,6 +184,8 @@ export class AuthService {
       userId: user.login_id,
       email: user.email,
       displayName: user.display_name,
+      roles: user.roles,
+      mustChangePassword: user.must_change_password,
       healthContext: healthContextFromUser(user),
       policyConsent: await this.policyConsentStatus(userId)
     };
@@ -343,7 +354,7 @@ export class AuthService {
 
   private async findByLoginId(loginId: string) {
     const result = await this.db.query<UserRow>(
-      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
+      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, roles, must_change_password, failed_login_attempts, locked_until, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
        FROM ${this.db.table("users")}
        WHERE login_id = $1 AND deleted_at IS NULL`,
       [loginId]
@@ -353,7 +364,7 @@ export class AuthService {
 
   private async findByEmail(email: string) {
     const result = await this.db.query<UserRow>(
-      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
+      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, roles, must_change_password, failed_login_attempts, locked_until, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
        FROM ${this.db.table("users")}
        WHERE lower(email) = lower($1) AND deleted_at IS NULL`,
       [email]
@@ -361,46 +372,56 @@ export class AuthService {
     return result.rows[0];
   }
 
-  private async createCode(table: "email_verification_codes" | "password_reset_codes", userId: string, ttlMinutes: number) {
-    const code = String(randomInt(100000, 1000000));
-    await this.db.query(
-      `INSERT INTO ${this.db.table(table)} (id, user_id, code_hash, expires_at)
-       VALUES ($1, $2, $3, now() + ($4 || ' minutes')::interval)`,
-      [this.db.id(), userId, await argon2.hash(code), String(ttlMinutes)]
+  private async findById(id: string) {
+    const result = await this.db.query<UserRow>(
+      `SELECT id, login_id, email, email_verified_at, password_hash, display_name, roles, must_change_password, failed_login_attempts, locked_until, age_range, period_started_age_range, hormonal_medication_context, pregnancy_postpartum_status, cycle_baseline
+       FROM ${this.db.table("users")}
+       WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
     );
-    return code;
+    return result.rows[0];
   }
 
-  private async consumeCode(table: "email_verification_codes" | "password_reset_codes", userId: string, code: string) {
-    const result = await this.db.query<CodeRow>(
-      `SELECT id, code_hash
-       FROM ${this.db.table(table)}
-       WHERE user_id = $1
-         AND used_at IS NULL
-         AND expires_at > now()
-       ORDER BY created_at DESC
-       LIMIT 5`,
-      [userId]
-    );
-
-    for (const row of result.rows) {
-      if (await argon2.verify(row.code_hash, code)) {
-        await this.db.query(`UPDATE ${this.db.table(table)} SET used_at = now() WHERE id = $1`, [row.id]);
-        return;
-      }
+  private async ensureSeedAdmin() {
+    const email = (process.env.SEED_ADMIN_EMAIL ?? "admin@whjc.example").toLowerCase();
+    const loginId = (process.env.SEED_ADMIN_USER_ID ?? email).toLowerCase();
+    if (await this.findByLoginId(loginId)) {
+      return;
     }
 
-    throw new UnauthorizedException("Invalid or expired code.");
+    await this.db.query(
+      `INSERT INTO ${this.db.table("users")}
+        (id, login_id, email, email_verified_at, password_hash, display_name, roles, must_change_password)
+       VALUES ($1, $2, $3, now(), $4, $5, ARRAY['admin']::text[], true)`,
+      [
+        this.db.id(),
+        loginId,
+        email,
+        await argon2.hash(process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe12345!"),
+        process.env.SEED_ADMIN_DISPLAY_NAME ?? "Journal Admin"
+      ]
+    );
   }
 
-  private includeDevCodes() {
-    return process.env.NODE_ENV !== "production";
+  private async recordFailedLogin(user: UserRow) {
+    const attempts = user.failed_login_attempts + 1;
+    const lockedUntil = attempts >= 5 ? new Date(Date.now() + 10 * 60 * 1000) : null;
+    await this.db.query(
+      `UPDATE ${this.db.table("users")}
+       SET failed_login_attempts = $1,
+           locked_until = $2,
+           updated_at = now()
+       WHERE id = $3`,
+      [lockedUntil ? 0 : attempts, lockedUntil, user.id]
+    );
   }
 
-  private async issueToken(user: Pick<UserRow, "id" | "login_id" | "display_name">) {
+  private async issueToken(user: Pick<UserRow, "id" | "login_id" | "display_name" | "roles" | "must_change_password">) {
     const accessToken = await this.jwt.signAsync({
       sub: user.id,
-      userId: user.login_id
+      userId: user.login_id,
+      roles: user.roles,
+      mustChangePassword: user.must_change_password
     });
 
     return {
@@ -409,8 +430,23 @@ export class AuthService {
       user: {
         id: user.id,
         userId: user.login_id,
-        displayName: user.display_name
+        displayName: user.display_name,
+        roles: user.roles,
+        mustChangePassword: user.must_change_password
       }
+    };
+  }
+
+  private safeUser(user: Pick<UserRow, "id" | "login_id" | "email" | "display_name" | "roles" | "must_change_password" | "email_verified_at" | "locked_until">) {
+    return {
+      id: user.id,
+      userId: user.login_id,
+      email: user.email,
+      displayName: user.display_name,
+      roles: user.roles,
+      mustChangePassword: user.must_change_password,
+      active: !user.locked_until || user.locked_until <= new Date(),
+      emailVerifiedAt: user.email_verified_at
     };
   }
 
@@ -444,7 +480,7 @@ function emailDomain(email: string) {
   return email.split("@")[1]?.toLowerCase() ?? "unknown";
 }
 
-function healthContextFromInput(input: RegisterInput) {
+function healthContextFromInput(input: HealthContextInput) {
   return {
     ageRange: input.ageRange ?? null,
     periodStartedAgeRange: input.periodStartedAgeRange ?? null,
@@ -469,6 +505,6 @@ function healthContextFromUser(
   };
 }
 
-function hasHealthContext(input: RegisterInput) {
+function hasHealthContext(input: HealthContextInput) {
   return Object.values(healthContextFromInput(input)).some(Boolean);
 }
